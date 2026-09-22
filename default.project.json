@@ -1,5 +1,5 @@
 {
-  "name": "roblox-game",
+  "name": "VIP",
   "tree": {
     "$className": "DataModel",
 
@@ -9,10 +9,7 @@
         "$path": "src/shared"
       },
       "Remotes": {
-        "$className": "Folder",
-        "WelcomeMessage": {
-          "$className": "RemoteEvent"
-        }
+        "$className": "Folder"
       }
     },
 
@@ -44,10 +41,10 @@
         "$properties": {
           "Anchored": true,
           "Locked": true,
-          "Size": [512, 20, 512],
-          "Position": [0, -10, 0],
-          "Color": [0.38, 0.51, 0.31],
-          "Material": "Grass",
+          "Size": [1200, 2, 900],
+          "Position": [0, -1, -100],
+          "Color": [0.22, 0.23, 0.24],
+          "Material": "Asphalt",
           "TopSurface": "Smooth",
           "BottomSurface": "Smooth"
         }
@@ -57,8 +54,10 @@
         "$properties": {
           "Anchored": true,
           "Locked": true,
+          "Enabled": false,
+          "Transparency": 1,
           "Size": [12, 1, 12],
-          "Position": [0, 0.5, 0],
+          "Position": [0, 0.5, -480],
           "TopSurface": "Smooth",
           "BottomSurface": "Smooth"
         }

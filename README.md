@@ -1,141 +1,94 @@
-# Roblox Game Repo — Phase 0 Scaffold
+# VIP — Roblox tactical escort (slice 0)
 
-This repo is the source of truth for the Luau code and project structure of a Roblox
-experience. [Rojo](https://rojo.space) syncs these files into the Roblox Studio DataModel on your
-machine; Studio stays the place for playtesting, world/art editing, and publishing.
+5v5 round-based tactical shooter. Four bodyguards escort a pistol-only President to a
+safe house and hold a 30-second capture; terrorists win by killing him or running out
+the 300-second clock.
 
-Genre is intentionally undecided. What ships here is a working sync skeleton plus one tiny smoke
-feature (a welcome message printed on the server and shown as a HUD banner on the client) so you
-can confirm the round trip repo → Studio works before any real gameplay lands.
+This repo is the Luau / Rojo source of truth. Sync into Roblox Studio with Rojo; Studio
+stays the place for playtesting and publishing.
+
+## What's playable in slice 0
+
+One complete round loop on an urban greybox (Motorcade / Market / Consulate / Precinct):
+
+| Feature | Status |
+| --- | --- |
+| `LIVE` ↔ `CAPTURE` + `ROUND_END`, 300s clock never pauses | Yes |
+| Capture: 30s unbroken hold, resets to 0 on leave, entry only before t=270 | Yes |
+| Win reasons: President death, President disconnect, terrorist wipe, timer expiry (incl. mid-capture), capture complete | Yes |
+| Friendly fire off; server-authoritative hits; no weapon pickups | Yes |
+| HUD: round timer, objective banner, capture bar, last-entry warning | Yes |
+| Best of 7, side swap, economy / buy, roll ability, full arsenal | Deferred (slices 1–3) |
+
+Rounds loop forever after a short lobby. With 2 players: lowest `UserId` is President
+(Good), the other is Terrorist. Extra players fill bodyguards then terrorists.
 
 ## Repo layout
 
 ```
 .
-├── default.project.json   # Rojo tree: source folders → DataModel services + baseline place
-├── rokit.toml             # Pinned CLI tools (rojo, selene, stylua)
-├── selene.toml            # Lint config (Roblox standard library)
-├── stylua.toml            # Formatter config (tabs, 100 cols)
+├── default.project.json
+├── rokit.toml
 ├── src/
-│   ├── client/            # → StarterPlayer.StarterPlayerScripts.Client
-│   ├── server/            # → ServerScriptService.Server
-│   └── shared/            # → ReplicatedStorage.Shared
+│   ├── client/     # HudController, InputController
+│   ├── server/     # Round / Capture / Objective / Combat / Map …
+│   └── shared/     # GameConfig, Enums, Net, Types
 └── .github/workflows/ci.yml
 ```
 
-File-name suffixes decide the instance class: `*.server.luau` → `Script`,
-`*.client.luau` → `LocalScript`, plain `*.luau` → `ModuleScript`.
-
-`default.project.json` also declares a minimal baseline place (Workspace with a baseplate and spawn,
-Lighting, Players, SoundService, and a `ReplicatedStorage.Remotes` folder holding the
-`WelcomeMessage` RemoteEvent) so `rojo build` produces a place you can open and press Play in.
-
 ## Local setup
 
-Everything below runs on your own machine. Cloud agents can edit this repo and run lint/build, but
-they cannot run Studio or connect the sync session for you.
-
-### 1. Install Rokit
-
-Rokit installs and pins the CLI tools listed in `rokit.toml`, so everyone gets identical versions.
-
-macOS / Linux:
+### 1. Install Rokit and tools
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/rojo-rbx/rokit/main/scripts/install.sh | bash
-```
-
-Windows (PowerShell):
-
-```powershell
-powershell -c "irm https://raw.githubusercontent.com/rojo-rbx/rokit/main/scripts/install.ps1 | iex"
-```
-
-Restart your shell afterwards so `~/.rokit/bin` is on `PATH`.
-
-### 2. Install the pinned tools
-
-```bash
+# Windows: irm https://raw.githubusercontent.com/rojo-rbx/rokit/main/scripts/install.ps1 | iex
 rokit install
+rojo plugin install   # Studio plugin (Windows / macOS)
 ```
 
-Rokit asks you to trust each tool the first time. Confirm, then verify:
-
-```bash
-rojo --version     # Rojo 7.7.0
-selene --version   # selene 0.31.0
-stylua --version   # stylua 2.5.2
-```
-
-### 3. Install the Rojo Studio plugin
-
-```bash
-rojo plugin install
-```
-
-That drops the plugin into Studio's local plugins folder (Windows and macOS only — it exits with
-"Your platform is not currently supported" on Linux, where Studio does not run). Restart Studio if it
-was already open. Alternative: install "Rojo" from the Creator Store — just keep the plugin's major
-version matching the CLI's, i.e. Rojo 7.
-
-### 4. Start a sync session
+### 2. Sync into Studio
 
 ```bash
 rojo serve
 ```
 
-This serves `default.project.json` on `http://localhost:34872` by default.
+In Studio: **Plugins → Rojo → Connect** (default `localhost:34872`).
 
-### 5. Connect from Studio
-
-1. Open the place you want to sync into. For a first run, use a place built from this project
-   (see below) or a fresh baseplate.
-2. In Studio, open the **Plugins** tab → **Rojo** → **Connect**.
-3. Accept the default address/port and connect.
-
-You should now see `ReplicatedStorage.Shared`, `ServerScriptService.Server`, and
-`StarterPlayer.StarterPlayerScripts.Client` populated from `src/`.
-
-### 6. Confirm the round trip
-
-Press **Play** in Studio. The Output window prints two `[WelcomeService]` / `[WelcomeHud]` lines, and
-a banner appears at the top of the screen naming you. Now edit the `Welcome.GameName` string in
-`src/shared/Welcome.luau`, save, and watch Studio update the script without reconnecting. That edit
-landing in Studio is the Phase 0 exit criterion.
-
-## Building a place file
-
-`rojo serve` syncs into an already-open place. `rojo build` instead writes a standalone place from
-the project tree:
+Or build a place file and open it:
 
 ```bash
 mkdir -p build
-rojo build default.project.json --output build/game.rbxl     # binary, open this in Studio
-rojo build default.project.json --output build/game.rbxlx    # XML, useful for diffing
+rojo build default.project.json --output build/game.rbxl
 ```
 
-Open `build/game.rbxl` in Studio for a clean starting place. Built places are gitignored — the repo,
-not the `.rbxl`, is the source of truth for scripts.
+### 3. Playtest checklist (Matthew)
 
-## Lint and format
+1. Start **two** Studio clients (local server + 1 player, or Team Test).
+2. Wait for the 5s lobby countdown → round goes `LIVE`.
+3. Confirm roles on the HUD (Good · President vs Terrorist).
+4. **Capture win:** President reaches Consulate (A, blue) or Precinct (B, orange), stands
+   on the yellow boundary for 30s without leaving.
+5. **Capture break:** leave the volume mid-hold → progress resets; banner says broken.
+6. **Kill win:** Terrorist shoots the President (LMB) → Terrorists win immediately.
+7. **Wipe win:** President eliminates the only terrorist → Good wins.
+8. **Disconnect:** stop the President client mid-round → Terrorists win.
+9. **Deadline:** after the timer drops below 0:30, entering a house shows `TOO LATE` and
+   does not start capture; banner switches to `ELIMINATE`.
+
+Greybox map is spawned at runtime by `MapService` (safe houses ~800 studs apart,
+Motorcade south, Market midfield, rooftops on the approach).
+
+## Lint / build
 
 ```bash
-stylua src/            # format in place
-stylua --check src/    # CI-style check, no writes
-selene src/            # lint against the Roblox standard library
+stylua src/
+selene src/
+rojo build default.project.json --output build/game.rbxl
 ```
 
-Selene downloads and caches the Roblox API standard library on first run, so the initial invocation
-needs network access. The generated `roblox.toml` / `roblox.yml` is gitignored.
+CI runs StyLua check, Selene, and a Rojo build smoke test on every PR.
 
-CI (`.github/workflows/ci.yml`) runs those three commands plus a `rojo build` smoke test on every
-push to `main` and every pull request, and uploads the built place as an artifact. Nothing publishes
-to Roblox from CI.
+## Design source
 
-## Not included yet (on purpose)
-
-- **Wally packages** — add `wally.toml` when a real dependency shows up, not before.
-- **Publishing / Open Cloud** — Phase 0 publishing is manual from Studio. No API keys needed.
-- **Roblox Studio MCP** — optional local add-on you can enable later to let an agent drive Studio
-  directly. It is not required for this workflow.
-- **Script Sync** — deliberately unused; Rojo owns the filesystem → Studio direction.
+Authoritative rules: Project HQ `docs/vip-game-design.md` (§11 = slice 0 plan).
