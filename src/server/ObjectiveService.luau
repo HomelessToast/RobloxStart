@@ -125,6 +125,9 @@ function ObjectiveService.objectiveBanner(roundRemaining: number, roundState: st
 	if roundState == Enums.RoundState.RoundEnd then
 		return "ROUND OVER"
 	end
+	if roundState == Enums.RoundState.Buy then
+		return "BUY PHASE — purchase weapons & armor"
+	end
 	if roundState == Enums.RoundState.Intermission then
 		return "INTERMISSION — sides swap next"
 	end

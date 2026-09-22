@@ -122,6 +122,24 @@ function TeamService.hasLivingBody(player: Player): boolean
 	return humanoid ~= nil and humanoid.Health > 0
 end
 
+function TeamService.getTeamId(player: Player): string?
+	return TeamService.getAssignment(player).teamId
+end
+
+function TeamService.getAliveBodyguards(): { Player }
+	local result = {}
+	for player, assignment in assignments do
+		if
+			player.Parent
+			and assignment.role == Enums.Role.Bodyguard
+			and TeamService.hasLivingBody(player)
+		then
+			table.insert(result, player)
+		end
+	end
+	return result
+end
+
 function TeamService.clearPlayer(player: Player)
 	if president == player then
 		president = nil

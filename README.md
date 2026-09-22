@@ -21,9 +21,10 @@ Market / Consulate / Precinct):
 | Best of 7 (first to 4), sides alternate every round, HUD score + swap announce | Yes |
 | President: solo Good → that player; else rotate by UserId within the Good team | Yes |
 | Friendly fire off; server-authoritative hits; no weapon pickups | Yes |
-| HUD: round timer, score (e.g. 2–1), objective banner, capture bar, last-entry warning | Yes |
+| BUY phase (20s) + buy menu; US/RU arsenals; armor damage pool; cash economy | Yes |
+| HUD: round timer, score, cash, armor, objective banner, capture bar | Yes |
 | Metric greybox from `MapMetrics` + `MapService` (git-tracked Parts builder) | Yes |
-| Economy / buy, roll ability, full arsenal | Parallel / deferred |
+| Roll ability, utility nades | Deferred |
 
 Match start is **not** automatic on join — players spawn on the elevated **VIP briefing
 lobby** (south/above the city). Stand in a **Day** or **Night** ready pad with **2–10**
@@ -45,11 +46,13 @@ returns to the armed ready pad for intermission, then auto-continues. After a te
 ├── default.project.json
 ├── rokit.toml
 ├── src/
-│   ├── client/     # HudController, InputController
-│   ├── server/     # Round / Capture / Objective / Combat / Map / MapValidator …
-│   └── shared/     # GameConfig, MapMetrics, Enums, Net, Types
+│   ├── client/     # HudController, InputController, BuyMenuController
+│   ├── server/     # Round / Match / Lobby / Buy / Economy / Combat / Weapon / Map …
+│   └── shared/     # GameConfig, WeaponDefs, Ballistics, MapMetrics, Enums, Net
 └── .github/workflows/ci.yml
 ```
+
+Economy & roster decisions: Project HQ `docs/vip-economy-weapons.md`.
 
 ## Map metrics (measured path ribbons)
 
@@ -96,8 +99,8 @@ Metric distances above are unchanged. Massing follows a **real city grid** hiera
    rotate (§7.5).
 
 Art is still colored Parts only — modular dress is deferred until these metrics
-pass playtest. Economy / weapons expansion is parallel work on this PR; match flow
-(bo7 + side swap) is live — see `MatchService` / `RoundService`.
+pass playtest. Weapons + economy are live (`WeaponDefs` / `GameConfig.Economy`);
+match flow (bo7 + side swap) lives in `MatchService` / `RoundService`.
 
 ## Local setup
 

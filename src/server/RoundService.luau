@@ -2,12 +2,13 @@
 --[[
 	Round + match state machine.
 
-	  LOBBY → LIVE ⇄ CAPTURE → ROUND_END → INTERMISSION → LIVE …
-	                                 └→ MATCH_END → LOBBY
+	  LOBBY → BUY → LIVE ⇄ CAPTURE → ROUND_END → INTERMISSION → BUY → LIVE …
+	                                          └→ MATCH_END → LOBBY
 
 	Lobby start is gated by Day/Night ready pads (LobbyService). Mid-match
 	rounds auto-continue with the same roster after INTERMISSION — players are
-	teleported back to the armed ready pad between rounds, then onto the map.
+	teleported back to the armed ready pad between rounds, then onto the map
+	for BUY (frozen) before LIVE.
 ]]
 
 local Players = game:GetService("Players")
@@ -29,6 +30,9 @@ local WeaponService = require(script.Parent.WeaponService)
 local CombatService = require(script.Parent.CombatService)
 local CaptureService = require(script.Parent.CaptureService)
 local ObjectiveService = require(script.Parent.ObjectiveService)
+local EconomyService = require(script.Parent.EconomyService)
+local BuyService = require(script.Parent.BuyService)
+local PlayerStateService = require(script.Parent.PlayerStateService)
 
 local RoundService = {}
 
@@ -47,6 +51,7 @@ local pendingMode: LobbyService.LobbyMode? = nil
 -- Last committed round resolution (shown through ROUND_END / INTERMISSION).
 local lastResolution: ObjectiveService.Resolution? = nil
 local lastCommit: MatchService.RoundCommit? = nil
+local lastEconomySummary = ""
 
 local function announce(text: string, kind: string?)
 	lastAnnouncement = text
@@ -83,6 +88,12 @@ local function broadcastRound()
 				maxN
 			)
 		end
+	elseif state == Enums.RoundState.Buy then
+		banner = string.format(
+			"BUY PHASE — %ds · Score %s · B for shop",
+			math.max(0, math.ceil(timeRemaining)),
+			match.scoreLine
+		)
 	elseif state == Enums.RoundState.RoundEnd and lastResolution then
 		banner = string.format(
 			"ROUND OVER — %s  ·  Score %s",
@@ -93,9 +104,6 @@ local function broadcastRound()
 		local sideNote = if MatchService.didSidesSwapThisRound() or (roundNumber >= 1)
 			then "Teams swap sides"
 			else "Opening sides"
-		-- During intermission we are *about* to play roundIndex+1 after beginNextRound
-		-- has already advanced — beginNextRound runs at INTERMISSION entry, so
-		-- roundIndex is already the upcoming round number.
 		banner = string.format(
 			"Round %d · %s · Score %s (first to %d)",
 			roundNumber,
@@ -135,8 +143,9 @@ local function broadcastRoundThrottled(dt: number, force: boolean?)
 end
 
 local function pushAllPlayerStates()
-	for _, player in Players:GetPlayers() do
+	for _, player in MatchService.getRoster() do
 		WeaponService.pushPlayerState(player)
+		EconomyService.push(player)
 	end
 end
 
@@ -154,6 +163,7 @@ local function teleportRosterToLobbyPad(mode: LobbyService.LobbyMode?)
 		end
 		task.wait(0.4)
 		for _, player in Players:GetPlayers() do
+			SpawnService.setFrozen(player, false)
 			SpawnService.teleportToReadyPad(player, mode)
 		end
 	end)
@@ -163,6 +173,7 @@ local function returnEveryoneToLobbySpawn()
 	LobbyService.applyLobbyLighting()
 	pendingMode = nil
 	lobbyCountdown = 0
+	BuyService.setOpen(false)
 	task.spawn(function()
 		for _, player in Players:GetPlayers() do
 			if not player.Character then
@@ -171,24 +182,40 @@ local function returnEveryoneToLobbySpawn()
 		end
 		task.wait(0.4)
 		for _, player in Players:GetPlayers() do
+			SpawnService.setFrozen(player, false)
 			SpawnService.teleportToLobby(player)
 		end
 	end)
 end
 
-local function prepareMatchPlayers(players: { Player })
-	-- Called only from beginLive, which is itself deferred off Heartbeat.
+local function unfreezeRoster()
+	for _, player in MatchService.getRoster() do
+		SpawnService.setFrozen(player, false)
+	end
+end
+
+local function prepareBuyPlayers(players: { Player })
+	-- Called only from beginBuy, which is itself deferred off Heartbeat.
 	for _, player in players do
 		if not player.Character then
 			respawnPlayer(player)
 		end
 	end
 	task.wait(0.5)
+	PlayerStateService.resetAllArmor()
+	LoadoutService.clear()
 	for _, player in players do
 		if player.Character then
+			local teamId = TeamService.getTeamId(player)
+			if teamId then
+				EconomyService.setTeam(player, teamId)
+			end
+			PlayerStateService.resetArmor(player)
 			SpawnService.prepareCharacter(player)
 			LoadoutService.grant(player)
+			SpawnService.setFrozen(player, true)
 			WeaponService.pushPlayerState(player)
+			EconomyService.push(player)
 		end
 	end
 end
@@ -205,6 +232,7 @@ local function enterMatchEnd()
 	state = Enums.RoundState.MatchEnd
 	ending = false
 	CombatService.setRoundLive(false)
+	BuyService.setOpen(false)
 	CaptureService.stopMonitoring()
 	timeRemaining = GameConfig.MatchEndSeconds
 
@@ -261,13 +289,37 @@ local function enterRoundEnd(resolution: ObjectiveService.Resolution)
 	ending = true
 	state = Enums.RoundState.RoundEnd
 	CombatService.setRoundLive(false)
+	BuyService.setOpen(false)
 	CaptureService.stopMonitoring()
+	unfreezeRoster()
 	timeRemaining = GameConfig.RoundEndSeconds
 	lastResolution = resolution
 
 	local commit = MatchService.commitRoundWin(resolution.winnerSide)
 	lastCommit = commit
 	local match = MatchService.snapshot()
+
+	local deltas = EconomyService.settleRound({
+		winnerSide = resolution.winnerSide,
+		reason = resolution.reason,
+		presidentKiller = nil,
+		captureWasActiveOnPresidentDeath = false,
+		aliveBodyguardsOnCapture = if resolution.reason
+				== Enums.RoundEndReason.CaptureComplete
+			then TeamService.getAliveBodyguards()
+			else nil,
+	})
+	local parts = {}
+	for player, delta in deltas do
+		table.insert(
+			parts,
+			string.format("%s %s%d", player.Name, if delta >= 0 then "+" else "", delta)
+		)
+	end
+	lastEconomySummary = table.concat(parts, " · ")
+	if lastEconomySummary == "" then
+		lastEconomySummary = "No cash changes"
+	end
 
 	Remotes.get(Net.RoundEnded):FireAllClients({
 		winnerSide = resolution.winnerSide,
@@ -278,59 +330,41 @@ local function enterRoundEnd(resolution: ObjectiveService.Resolution)
 		winsA = commit.winsA,
 		winsB = commit.winsB,
 		matchOver = commit.matchOver,
+		economySummary = lastEconomySummary,
 	})
-	announce(string.format("%s · Score %s", resolution.message, match.scoreLine), "warning")
+	announce(
+		string.format(
+			"%s · Score %s · %s",
+			resolution.message,
+			match.scoreLine,
+			lastEconomySummary
+		),
+		"warning"
+	)
 
 	-- Matthew: round over → teleport everyone back to lobby (ready pad).
 	local mode = match.lobbyMode :: LobbyService.LobbyMode?
 	teleportRosterToLobbyPad(mode)
 	broadcastRound()
+	pushAllPlayerStates()
 	print(
 		string.format(
-			"[RoundService] Round %d ended: %s (%s) score=%s matchOver=%s",
+			"[RoundService] Round %d ended: %s (%s) score=%s matchOver=%s | %s",
 			match.roundIndex,
 			resolution.reason,
 			resolution.message,
 			match.scoreLine,
-			tostring(commit.matchOver)
+			tostring(commit.matchOver),
+			lastEconomySummary
 		)
 	)
 end
 
 local function beginLive()
-	transitioning = true
-	ending = false
-	lastAnnouncement = nil
-	ObjectiveService.resetFlags()
-	WeaponService.reset()
-	LoadoutService.clear()
-	CaptureService.reset()
-
-	local players = MatchService.getRoster()
-	if #players < GameConfig.MinPlayersToStart then
-		-- Roster collapsed — abandon match back to lobby queue.
-		MatchService.reset()
-		TeamService.reset()
-		state = Enums.RoundState.Lobby
-		pendingMode = nil
-		lobbyCountdown = 0
-		timeRemaining = 0
-		transitioning = false
-		returnEveryoneToLobbySpawn()
-		announce("Not enough players — back to lobby", "break")
-		broadcastRound()
-		return
-	end
-
-	TeamService.assignForRound(players)
-	local mode = MatchService.getLobbyMode()
-	if mode == "Day" or mode == "Night" then
-		LobbyService.applyMatchLighting(mode)
-	end
-	prepareMatchPlayers(players)
-
 	state = Enums.RoundState.Live
 	timeRemaining = GameConfig.RoundDurationSeconds
+	BuyService.setOpen(false)
+	unfreezeRoster()
 	pendingMode = nil
 	lobbyCountdown = 0
 	CombatService.setRoundLive(true)
@@ -354,12 +388,74 @@ local function beginLive()
 		string.format(
 			"[RoundService] Round %d LIVE (%s) — President=%s, A=%s B=%s score=%s players=%d",
 			match.roundIndex,
-			tostring(mode),
+			tostring(MatchService.getLobbyMode()),
 			if prez then prez.Name else "?",
 			match.sideA,
 			match.sideB,
 			match.scoreLine,
-			#players
+			#MatchService.getRoster()
+		)
+	)
+end
+
+local function beginBuy()
+	transitioning = true
+	ending = false
+	lastAnnouncement = nil
+	ObjectiveService.resetFlags()
+	WeaponService.reset()
+	CaptureService.reset()
+	CombatService.setRoundLive(false)
+	BuyService.setOpen(false)
+
+	local players = MatchService.getRoster()
+	if #players < GameConfig.MinPlayersToStart then
+		MatchService.reset()
+		TeamService.reset()
+		state = Enums.RoundState.Lobby
+		pendingMode = nil
+		lobbyCountdown = 0
+		timeRemaining = 0
+		transitioning = false
+		returnEveryoneToLobbySpawn()
+		announce("Not enough players — back to lobby", "break")
+		broadcastRound()
+		return
+	end
+
+	TeamService.assignForRound(players)
+	local mode = MatchService.getLobbyMode()
+	if mode == "Day" or mode == "Night" then
+		LobbyService.applyMatchLighting(mode)
+	end
+	prepareBuyPlayers(players)
+
+	state = Enums.RoundState.Buy
+	timeRemaining = GameConfig.BuyPhaseSeconds
+	pendingMode = nil
+	lobbyCountdown = 0
+	BuyService.setOpen(true)
+	transitioning = false
+	broadcastRound()
+	pushAllPlayerStates()
+
+	local match = MatchService.snapshot()
+	announce(
+		string.format(
+			"BUY — Round %d · Score %s · %ds",
+			match.roundIndex,
+			match.scoreLine,
+			GameConfig.BuyPhaseSeconds
+		),
+		"info"
+	)
+	print(
+		string.format(
+			"[RoundService] Round %d BUY (%ds) — players=%d score=%s",
+			match.roundIndex,
+			GameConfig.BuyPhaseSeconds,
+			#players,
+			match.scoreLine
 		)
 	)
 end
@@ -374,7 +470,7 @@ local function startMatchFromLobby(mode: LobbyService.LobbyMode, players: { Play
 	end
 	pendingMode = nil
 	lobbyCountdown = 0
-	beginLive()
+	beginBuy()
 end
 
 local function pickArmedZone(): (LobbyService.LobbyMode?, { Player })
@@ -459,6 +555,15 @@ function RoundService.step(dt: number)
 		return
 	end
 
+	if state == Enums.RoundState.Buy then
+		timeRemaining -= dt
+		broadcastRoundThrottled(dt)
+		if timeRemaining <= 0 then
+			beginLive()
+		end
+		return
+	end
+
 	if state == Enums.RoundState.RoundEnd then
 		timeRemaining -= dt
 		broadcastRoundThrottled(dt)
@@ -477,7 +582,7 @@ function RoundService.step(dt: number)
 		broadcastRoundThrottled(dt)
 		if timeRemaining <= 0 then
 			transitioning = true
-			task.spawn(beginLive)
+			task.spawn(beginBuy)
 		end
 		return
 	end
@@ -491,7 +596,9 @@ function RoundService.step(dt: number)
 			lastResolution = nil
 			lastCommit = nil
 			lastAnnouncement = nil
+			lastEconomySummary = ""
 			ending = false
+			BuyService.setOpen(false)
 			state = Enums.RoundState.Lobby
 			timeRemaining = 0
 			returnEveryoneToLobbySpawn()
@@ -589,6 +696,14 @@ function RoundService.init()
 	end)
 	CaptureService.init()
 	CombatService.init()
+	BuyService.init()
+	WeaponService.setBuyOpenGetter(function()
+		return BuyService.isOpen()
+	end)
+	BuyService.setPurchaseCallback(function(player)
+		WeaponService.pushPlayerState(player)
+		EconomyService.push(player)
+	end)
 	WeaponService.setAmmoChangedCallback(function(player)
 		WeaponService.pushPlayerState(player)
 	end)
@@ -606,6 +721,7 @@ function RoundService.init()
 				end)
 			end
 		end)
+		EconomyService.push(player)
 		broadcastRound()
 	end)
 
@@ -641,10 +757,11 @@ function RoundService.init()
 	broadcastRound()
 	print(
 		string.format(
-			"[RoundService] %s ready — bo%d first to %d, Day/Night pads (min=%d max=%d).",
+			"[RoundService] %s ready — bo%d first to %d, buy=%ds, Day/Night pads (min=%d max=%d).",
 			GameConfig.GameName,
 			GameConfig.MaxRoundsInMatch,
 			GameConfig.MatchWinsNeeded,
+			GameConfig.BuyPhaseSeconds,
 			GameConfig.MinPlayersToStart,
 			GameConfig.MaxPlayersPerLobbyZone
 		)

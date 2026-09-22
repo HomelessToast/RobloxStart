@@ -63,7 +63,11 @@ local objectiveLabel = makeLabel(
 objectiveLabel.TextXAlignment = Enum.TextXAlignment.Center
 objectiveLabel.Font = Enum.Font.GothamMedium
 
-local roleLabel = makeLabel("Role", UDim2.new(0, 20, 1, -120), UDim2.fromOffset(360, 28), 18)
+local roleLabel = makeLabel("Role", UDim2.new(0, 20, 1, -148), UDim2.fromOffset(360, 28), 18)
+local cashLabel = makeLabel("Cash", UDim2.new(0, 20, 1, -120), UDim2.fromOffset(220, 24), 16)
+cashLabel.TextColor3 = Color3.fromRGB(120, 220, 140)
+local armorLabel = makeLabel("Armor", UDim2.new(0, 20, 1, -96), UDim2.fromOffset(280, 24), 16)
+armorLabel.TextColor3 = Color3.fromRGB(140, 180, 255)
 local ammoLabel =
 	makeLabel("Ammo", UDim2.new(1, -20, 1, -120), UDim2.fromOffset(220, 28), 20, Vector2.new(1, 0))
 ammoLabel.TextXAlignment = Enum.TextXAlignment.Right
@@ -255,6 +259,9 @@ remotes:WaitForChild(Net.RoundEnded).OnClientEvent:Connect(function(payload)
 	if score then
 		msg = string.format("%s · %s", msg, tostring(score))
 	end
+	if typeof(payload.economySummary) == "string" and payload.economySummary ~= "" then
+		msg ..= " · " .. payload.economySummary
+	end
 	showBanner(msg, "warning")
 end)
 
@@ -270,12 +277,36 @@ remotes:WaitForChild(Net.MatchEnded).OnClientEvent:Connect(function(payload)
 	showBanner(text, "warning")
 end)
 
+remotes:WaitForChild(Net.EconomyState).OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	if typeof(payload.cash) == "number" then
+		cashLabel.Text = string.format("$%d", payload.cash)
+	end
+end)
+
 remotes:WaitForChild(Net.PlayerState).OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" then
 		return
 	end
 	playerAlive = payload.alive == true
 	roleLabel.Text = string.format("%s · %s", tostring(payload.side), tostring(payload.role))
+	if typeof(payload.cash) == "number" then
+		cashLabel.Text = string.format("$%d", payload.cash)
+	end
+	local armorPool = payload.armorPool or 0
+	local armorMax = payload.armorMax or 0
+	if armorMax > 0 then
+		armorLabel.Text = string.format(
+			"Armor %d/%d%s",
+			armorPool,
+			armorMax,
+			if payload.hasHelmet then " · HELMET" else ""
+		)
+	else
+		armorLabel.Text = "Armor —"
+	end
 	ammoLabel.Text = string.format(
 		"%s  %d / %d",
 		tostring(payload.weaponName or ""),

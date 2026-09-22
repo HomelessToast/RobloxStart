@@ -4,6 +4,7 @@ local Enums = {}
 
 Enums.RoundState = {
 	Lobby = "LOBBY",
+	Buy = "BUY",
 	Live = "LIVE",
 	Capture = "CAPTURE",
 	RoundEnd = "ROUND_END",
@@ -43,6 +44,23 @@ Enums.CaptureState = {
 Enums.SafeHouseId = {
 	A = "A",
 	B = "B",
+}
+
+Enums.PurchaseResult = {
+	Ok = "OK",
+	NotBuyPhase = "NOT_BUY_PHASE",
+	CannotAfford = "CANNOT_AFFORD",
+	WrongSide = "WRONG_SIDE",
+	PresidentPrimaryLocked = "PRESIDENT_PRIMARY_LOCKED",
+	UnknownItem = "UNKNOWN_ITEM",
+	AlreadyOwned = "ALREADY_OWNED",
+	Dead = "DEAD",
+}
+
+Enums.ArmorId = {
+	None = "None",
+	Light = "Light",
+	Heavy = "Heavy",
 }
 
 return Enums

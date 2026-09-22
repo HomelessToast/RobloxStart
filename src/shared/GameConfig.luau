@@ -1,5 +1,6 @@
 --!strict
--- Tunables for VIP slice 0. Capture duration and sprint speed also define map geometry.
+-- Tunables for VIP. Capture duration and sprint speed also define map geometry.
+-- Economy + armor: grounded in design doc §4 / §5.2 (see docs/vip-economy-weapons.md).
 
 local GameConfig = {
 	GameName = "VIP",
@@ -8,6 +9,7 @@ local GameConfig = {
 	MinPlayersToStart = 2,
 	MaxPlayersPerLobbyZone = 10, -- day and night ready pads each cap at 10 (5v5)
 	LobbyCountdownSeconds = 5,
+	BuyPhaseSeconds = 20, -- §1.2 [A]
 	RoundEndSeconds = 7,
 	IntermissionSeconds = 10, -- lobby pad + side-swap announce between rounds
 	MatchEndSeconds = 20, -- final scoreboard, then clear scores → lobby queue
@@ -19,11 +21,15 @@ local GameConfig = {
 	CaptureEntryDeadlineRemaining = 30,
 	LastEntryWarningRemaining = 35,
 
+	-- Side swap is owned by MatchService (§8.2); kept here as documentation.
+	SideSwapEveryRound = true,
+
 	--[[
 		Elevated VIP briefing lobby (south of the city, high Y).
 		City arena ≈ X±450 / Z −540…200 / walls ~148 — lobby sits further south
 		and above so the greybox stays visible below + north in the distance.
 		Compact pad; Day and Night ready zones share one platform.
+		Owned by LobbyService — do not relocate from weapons/economy work.
 	]]
 	Lobby = {
 		Center = Vector3.new(0, 185, -1050),
@@ -41,9 +47,50 @@ local GameConfig = {
 	FriendlyFire = false,
 	StartingHealth = 100,
 	MaxHealth = 100,
-	FireRateSeconds = 0.18,
 	MaxShotDistance = 800,
 	HitValidationSlopStuds = 12,
+
+	-- Armor (§5.2) — damage pool, not % reduction
+	Armor = {
+		BodyAbsorbFraction = 0.6, -- [A] primary combat dial; also in Ballistics
+		Light = {
+			id = "Light",
+			displayName = "Light Armor",
+			price = 650,
+			pool = 50,
+			hasHelmet = false,
+		},
+		Heavy = {
+			id = "Heavy",
+			displayName = "Heavy Armor + Helmet",
+			price = 1050,
+			pool = 100,
+			hasHelmet = true,
+		},
+	},
+
+	-- Economy (§4.2) — cash is the only thing that persists across rounds
+	Economy = {
+		StartingCash = 900,
+		CashCap = 12000,
+		WinBonus = 3000,
+		-- Loss streak ladder (per team, resets on a win). Steeper than CS because
+		-- nothing carries and sides alternate — no salvaged rifles.
+		LossBonuses = { 1600, 2300, 3000, 3700, 4200 },
+		KillReward = 300, -- flat, all weapons
+		PresidentKillBonus = 900, -- on top of KillReward → $1,200 total for VIP kill
+		CaptureBreakKillBonus = 400, -- [A] killing President inside an active capture
+		SurvivalBonus = 200, -- [A] material incentive when gear doesn't carry
+		BodyguardCaptureBonus = 400, -- alive bodyguard when capture completes
+		PresidentSurvivalBonus = 500, -- offsets pistol-only earning ceiling
+		SuicidePenalty = 300,
+		TeamKillPenalty = 500, -- N/A while FriendlyFire=false; kept for config completeness
+		Utility = {
+			Smoke = 250,
+			Flash = 250,
+			Frag = 350,
+		},
+	},
 
 	-- Movement (map parameter)
 	SprintSpeed = 22,
@@ -61,24 +108,6 @@ local GameConfig = {
 		FloorY = 0,
 		CaptureSize = Vector3.new(48, 24, 48),
 		HouseInteriorSize = Vector3.new(56, 20, 56),
-	},
-
-	-- Slice 0 weapons: one P0 per side, no buy / economy
-	Weapons = {
-		GoodPistol = {
-			id = "M9",
-			displayName = "M9 Beretta",
-			damage = 28,
-			magazine = 15,
-			reserve = 60,
-		},
-		TerroristPistol = {
-			id = "Makarov",
-			displayName = "Makarov PM",
-			damage = 30,
-			magazine = 8,
-			reserve = 48,
-		},
 	},
 }
 

@@ -1,22 +1,42 @@
 --!strict
 -- Server-authoritative hits. Client reports intent; server raycasts and applies damage.
--- Friendly fire is off: same-side damage is discarded before it lands.
+-- Friendly fire is off: same-side damage is discarded before it reaches the armor pool.
+-- No weapon pickups from corpses — LoadoutService is the only grant path.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local GameConfig = require(ReplicatedStorage.Shared.GameConfig)
+local Enums = require(ReplicatedStorage.Shared.Enums)
 local Net = require(ReplicatedStorage.Shared.Net)
+local Ballistics = require(ReplicatedStorage.Shared.Ballistics)
 local Remotes = require(script.Parent.Remotes)
 local TeamService = require(script.Parent.TeamService)
 local LoadoutService = require(script.Parent.LoadoutService)
 local WeaponService = require(script.Parent.WeaponService)
+local PlayerStateService = require(script.Parent.PlayerStateService)
+local EconomyService = require(script.Parent.EconomyService)
+local CaptureService = require(script.Parent.CaptureService)
 
 local CombatService = {}
 
 local roundLive = false
 local onPlayerDied: ((Player, Player?) -> ())? = nil
+
+-- Deterministic-enough spread per shot without trusting the client.
+local function rngFromShot(player: Player, origin: Vector3, direction: Vector3): () -> number
+	local seed = player.UserId
+		+ math.floor(origin.X * 10)
+		+ math.floor(origin.Z * 10)
+		+ math.floor(direction.X * 1000)
+		+ math.floor(os.clock() * 1000)
+	local state = seed % 2147483647
+	return function()
+		state = (state * 48271) % 2147483647
+		return state / 2147483647
+	end
+end
 
 function CombatService.setRoundLive(isLive: boolean)
 	roundLive = isLive
@@ -38,7 +58,17 @@ local function playerFromCharacter(character: Model): Player?
 	return Players:GetPlayerFromCharacter(character)
 end
 
-function CombatService.applyDamage(attacker: Player, victim: Player, amount: number)
+local function isHeadPart(part: BasePart): boolean
+	local name = string.lower(part.Name)
+	return name == "head" or string.find(name, "head", 1, true) ~= nil
+end
+
+function CombatService.applyDamage(
+	attacker: Player,
+	victim: Player,
+	healthDamage: number,
+	armorDamage: number
+)
 	if not roundLive then
 		return
 	end
@@ -60,14 +90,62 @@ function CombatService.applyDamage(attacker: Player, victim: Player, amount: num
 		return
 	end
 
-	humanoid:TakeDamage(amount)
+	if armorDamage > 0 then
+		PlayerStateService.applyArmorDamage(victim, armorDamage)
+	end
+
+	if healthDamage > 0 then
+		humanoid:TakeDamage(healthDamage)
+	end
 
 	if humanoid.Health <= 0 then
 		character:SetAttribute("Alive", false)
+		local wasPresident = TeamService.getRole(victim) == Enums.Role.President
+		local captureActive = CaptureService.isActive()
+		EconomyService.onKill(attacker, victim, {
+			victimWasPresident = wasPresident,
+			captureActive = captureActive and wasPresident,
+		})
 		if onPlayerDied then
 			onPlayerDied(victim, attacker)
 		end
 	end
+end
+
+local function resolvePellet(
+	attacker: Player,
+	origin: Vector3,
+	direction: Vector3,
+	def: any,
+	params: RaycastParams
+)
+	local result = Workspace:Raycast(origin, direction * GameConfig.MaxShotDistance, params)
+	if not result then
+		return
+	end
+
+	local hitCharacter = characterFromPart(result.Instance)
+	if not hitCharacter then
+		return
+	end
+	local victim = playerFromCharacter(hitCharacter)
+	if not victim or victim == attacker then
+		return
+	end
+
+	local armor = PlayerStateService.getArmor(victim)
+	local distance = (result.Position - origin).Magnitude
+	local breakdown = Ballistics.applyHit(
+		def.damage,
+		isHeadPart(result.Instance),
+		def.headshotMultiplier,
+		def.armorPenetration,
+		{ pool = armor.pool, hasHelmet = armor.hasHelmet },
+		distance,
+		def
+	)
+
+	CombatService.applyDamage(attacker, victim, breakdown.healthDamage, breakdown.armorDamage)
 end
 
 function CombatService.handleFireShot(player: Player, payload: any)
@@ -105,8 +183,8 @@ function CombatService.handleFireShot(player: Player, payload: any)
 		origin = root.Position + Vector3.new(0, 1.5, 0)
 	end
 
-	local loadout = LoadoutService.get(player)
-	if not loadout then
+	local def = LoadoutService.getDef(player)
+	if not def then
 		return
 	end
 
@@ -115,21 +193,12 @@ function CombatService.handleFireShot(player: Player, payload: any)
 	params.FilterDescendantsInstances = { character }
 	params.IgnoreWater = true
 
-	local result = Workspace:Raycast(origin, direction * GameConfig.MaxShotDistance, params)
-	if not result then
-		return
+	local rng = rngFromShot(player, origin, direction)
+	local pellets = math.max(1, def.pellets)
+	for _ = 1, pellets do
+		local dir = Ballistics.spreadDirection(direction, def.baseSpread, rng)
+		resolvePellet(player, origin, dir, def, params)
 	end
-
-	local hitCharacter = characterFromPart(result.Instance)
-	if not hitCharacter then
-		return
-	end
-	local victim = playerFromCharacter(hitCharacter)
-	if not victim or victim == player then
-		return
-	end
-
-	CombatService.applyDamage(player, victim, loadout.damage)
 end
 
 function CombatService.init()

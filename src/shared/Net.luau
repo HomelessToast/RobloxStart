@@ -5,11 +5,14 @@
 local Net = {
 	RoundState = "RoundState", -- Server → all: round + match score snapshot
 	CaptureState = "CaptureState", -- Server → all: capture snapshot
-	RoundEnded = "RoundEnded", -- Server → all: { winnerSide, reason, message, scoreLine, winningTeam }
+	RoundEnded = "RoundEnded", -- Server → all: { winnerSide, reason, message, scoreLine, winningTeam, economySummary? }
 	MatchEnded = "MatchEnded", -- Server → all: { winnerTeam, scoreLine, winsA, winsB }
 	HudBanner = "HudBanner", -- Server → all: { text, kind }
 	FireShot = "FireShot", -- Client → server: { origin, direction }
-	PlayerState = "PlayerState", -- Server → player: { side, role, alive, ammo, reserve }
+	PlayerState = "PlayerState", -- Server → player: loadout / cash / armor mirror
+	BuyRequest = "BuyRequest", -- Client → server: { kind: "Weapon"|"Armor", id: string }
+	BuyResult = "BuyResult", -- Server → player: { result, id?, cash?, message? }
+	EconomyState = "EconomyState", -- Server → player: { cash, lossStreak }
 }
 
 return Net
