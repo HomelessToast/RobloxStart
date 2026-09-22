@@ -2,16 +2,22 @@
 --[[
 	Builds the metric-correct urban greybox from MapMetrics.
 
-	Layout philosophy (Matthew feedback): dense city grid + CS2/Valorant lanes —
-	few meaningful routes with chokepoints that matter; no large empty plazas.
-	Metric ribbons in MapMetrics stay the distance source of truth.
+	City-first direction (Matthew): perimeter walls → road network → discrete
+	ladder snipes → feel of a dense city. Game mechanics (economy / bo7 /
+	weapons) stay out of this pass.
+
+	Layout philosophy: dense city grid + CS2/Valorant lanes — few meaningful
+	routes with chokepoints that matter; no large empty plazas. Metric ribbons
+	in MapMetrics stay the distance source of truth.
 
 	Gameplay wiring (unchanged contracts):
 	- Workspace.VIPMap / SafeHouseA|B / CaptureVolume (+ SafeHouseId attribute)
 	- MapService.getCaptureVolume / getSpawnCFrame / pointInPart
 
 	Also: MapAnchor tags, CaptureBoundary markers, costly choke bypasses,
-	elevated vantages (gapped roofs), overhead arcade, no lethal VIP falls.
+	tall city perimeter walls, continuous street asphalt, discrete TrussPart
+	ladder climbs onto selected roofs (no rooftop highway), overhead arcade,
+	no lethal VIP falls.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
@@ -34,6 +40,11 @@ local COLOR = {
 	wood = Color3.fromRGB(140, 110, 70),
 	cover = Color3.fromRGB(85, 85, 90),
 	wall = Color3.fromRGB(70, 70, 75),
+	facade = Color3.fromRGB(58, 62, 70),
+	facadeAccent = Color3.fromRGB(48, 52, 58),
+	window = Color3.fromRGB(100, 150, 180),
+	marking = Color3.fromRGB(210, 200, 140),
+	curb = Color3.fromRGB(120, 120, 118),
 	houseA = Color3.fromRGB(40, 90, 140),
 	houseB = Color3.fromRGB(140, 70, 40),
 	boundary = Color3.fromRGB(255, 220, 60),
@@ -43,6 +54,16 @@ local COLOR = {
 	glass = Color3.fromRGB(140, 190, 220),
 	path = Color3.fromRGB(180, 160, 60),
 	choke = Color3.fromRGB(80, 80, 85),
+}
+
+-- Playable arena AABB (parcel grid ± margin). Perimeter walls seal this volume.
+local ARENA = {
+	minX = -450,
+	maxX = 450,
+	minZ = -540,
+	maxZ = 200,
+	wallHeight = 148,
+	wallThickness = 14,
 }
 
 local function part(
@@ -288,45 +309,52 @@ local function safeHouse(parent: Folder, id: string, center: Vector3, displayNam
 	return folder
 end
 
-local function stairStack(
+--[[
+	Discrete climb: stacked TrussParts (Roblox-climbable). Costly 8–12s ascent —
+	roofs are firing decks, not a rotate layer (§7.5).
+]]
+local function climbLadder(
 	parent: Folder,
 	name: string,
 	base: Vector3,
-	toward: Vector3,
-	floors: number,
-	floorH: number
+	height: number,
+	facing: Vector3
 )
-	-- Low, collidable steps — no lethal drops on VIP routes.
-	local dir = (toward - Vector3.new(base.X, 0, base.Z))
-	if dir.Magnitude < 1 then
+	local floorY = MapMetrics.FloorY
+	local dir = Vector3.new(facing.X, 0, facing.Z)
+	if dir.Magnitude < 0.1 then
 		dir = Vector3.new(1, 0, 0)
 	else
-		dir = Vector3.new(dir.X, 0, dir.Z).Unit
+		dir = dir.Unit
 	end
-	local right = Vector3.new(-dir.Z, 0, dir.X)
-	for i = 1, floors * 3 do
-		local pos = base
-			+ dir * (i * 3.2)
-			+ Vector3.new(0, MapMetrics.FloorY + i * (floorH / 3) * 0.95, 0)
-		part(
-			parent,
-			name .. "_Step" .. i,
-			Vector3.new(8, 1, 4),
-			CFrame.lookAt(pos, pos + dir),
-			COLOR.concrete
-		)
-		-- Side rail (visual + soft guard)
-		if i % 2 == 0 then
-			part(
-				parent,
-				name .. "_Rail" .. i,
-				Vector3.new(1, 4, 3),
-				CFrame.new(pos + right * 5 + Vector3.new(0, 2, 0)),
-				COLOR.metal,
-				Enum.Material.Metal
-			)
+	-- TrussPart max useful segment ≈ 2×2×N; stack 16-stud sections.
+	local sectionH = 16
+	local sections = math.max(1, math.ceil(height / sectionH))
+	for i = 1, sections do
+		local h = math.min(sectionH, height - (i - 1) * sectionH)
+		if h < 2 then
+			break
 		end
+		local truss = Instance.new("TrussPart")
+		truss.Name = name .. "_Seg" .. i
+		truss.Size = Vector3.new(2, h, 2)
+		truss.Anchored = true
+		truss.CanCollide = true
+		truss.Material = Enum.Material.Metal
+		truss.Color = COLOR.metal
+		local cy = floorY + (i - 1) * sectionH + h / 2
+		-- Offset slightly off the building face so players can grab it.
+		truss.CFrame = CFrame.new(base.X + dir.X * 1.2, cy, base.Z + dir.Z * 1.2)
+		truss.Parent = parent
 	end
+	-- Small roof ledge at the top so you land (isolated deck — no neighbor bridge).
+	part(
+		parent,
+		name .. "_Ledge",
+		Vector3.new(10, 1, 8),
+		CFrame.new(base.X + dir.X * 4, floorY + height + 0.5, base.Z + dir.Z * 4),
+		COLOR.concrete
+	)
 end
 
 local function vantageBuilding(
@@ -336,7 +364,7 @@ local function vantageBuilding(
 	footprint: Vector3,
 	floors: number,
 	windowFacing: Vector3,
-	stairToward: Vector3
+	ladderSide: Vector3
 )
 	local folder = Instance.new("Folder")
 	folder.Name = name
@@ -366,14 +394,10 @@ local function vantageBuilding(
 		Enum.Material.Metal
 	)
 
-	stairStack(
-		folder,
-		"Stairs",
-		base + Vector3.new(footprint.X / 2 + 2, 0, 0),
-		stairToward,
-		floors,
-		floorH
-	)
+	-- Ladder on one face only — discrete sniper access, not free stair highway.
+	local ladderBase = base
+		+ Vector3.new(ladderSide.X * (footprint.X / 2 + 1), 0, ladderSide.Z * (footprint.Z / 2 + 1))
+	climbLadder(folder, "SniperLadder", ladderBase, totalH, ladderSide)
 
 	local win = part(
 		folder,
@@ -402,6 +426,182 @@ local function vantageBuilding(
 		),
 		COLOR.concrete
 	)
+end
+
+--[[
+	Very tall city-themed perimeter — skyline / facade walls that fully seal the
+	arena so you cannot see or walk beyond the playable city.
+]]
+local function buildPerimeterWalls(parent: Folder)
+	local folder = Instance.new("Folder")
+	folder.Name = "Perimeter"
+	folder.Parent = parent
+
+	local floorY = MapMetrics.FloorY
+	local h = ARENA.wallHeight
+	local t = ARENA.wallThickness
+	local midY = floorY + h / 2
+	local spanX = ARENA.maxX - ARENA.minX
+	local spanZ = ARENA.maxZ - ARENA.minZ
+	local cx = (ARENA.minX + ARENA.maxX) * 0.5
+	local cz = (ARENA.minZ + ARENA.maxZ) * 0.5
+
+	local function facadeWall(name: string, size: Vector3, cframe: CFrame)
+		part(folder, name, size, cframe, COLOR.facade, Enum.Material.Concrete)
+		-- Window-strip greybox (city facade read without see-through gaps)
+		local alongX = size.X >= size.Z
+		local along = if alongX then size.X else size.Z
+		local step = 18
+		local rows = 6
+		for row = 1, rows do
+			local wy = floorY + 18 + (row - 1) * (h - 28) / (rows - 1)
+			for i = 0, math.floor(along / step) - 1 do
+				local offset = -along * 0.5 + step * 0.5 + i * step
+				local wx = if alongX then cframe.Position.X + offset else cframe.Position.X
+				local wz = if alongX then cframe.Position.Z else cframe.Position.Z + offset
+				-- Slight inset toward arena so windows read on the inner face
+				local inset = t * 0.35
+				if name == "WallNorth" then
+					wz += inset
+				elseif name == "WallSouth" then
+					wz -= inset
+				elseif name == "WallEast" then
+					wx -= inset
+				elseif name == "WallWest" then
+					wx += inset
+				end
+				local pane = part(
+					folder,
+					name .. "_Win_" .. row .. "_" .. i,
+					Vector3.new(8, 6, 0.6),
+					CFrame.new(wx, wy, wz),
+					COLOR.window,
+					Enum.Material.Glass,
+					false
+				)
+				pane.Transparency = 0.45
+			end
+		end
+	end
+
+	-- Four walls (outer faces flush to ARENA AABB)
+	facadeWall(
+		"WallSouth",
+		Vector3.new(spanX + t * 2, h, t),
+		CFrame.new(cx, midY, ARENA.minZ - t * 0.5)
+	)
+	facadeWall(
+		"WallNorth",
+		Vector3.new(spanX + t * 2, h, t),
+		CFrame.new(cx, midY, ARENA.maxZ + t * 0.5)
+	)
+	facadeWall("WallWest", Vector3.new(t, h, spanZ), CFrame.new(ARENA.minX - t * 0.5, midY, cz))
+	facadeWall("WallEast", Vector3.new(t, h, spanZ), CFrame.new(ARENA.maxX + t * 0.5, midY, cz))
+
+	-- Skyline silhouette crowns (varied heights — greybox city rim)
+	local crownStep = 40
+	for x = ARENA.minX, ARENA.maxX, crownStep do
+		local crownH = 12 + (math.abs(math.floor(x * 0.13)) % 5) * 8
+		part(
+			folder,
+			"SkylineS_" .. math.floor(x),
+			Vector3.new(crownStep - 4, crownH, t * 0.6),
+			CFrame.new(x + crownStep * 0.5, floorY + h + crownH / 2, ARENA.minZ - t * 0.5),
+			COLOR.facadeAccent
+		)
+		part(
+			folder,
+			"SkylineN_" .. math.floor(x),
+			Vector3.new(crownStep - 4, crownH + 4, t * 0.6),
+			CFrame.new(x + crownStep * 0.5, floorY + h + (crownH + 4) / 2, ARENA.maxZ + t * 0.5),
+			COLOR.facadeAccent
+		)
+	end
+	for z = ARENA.minZ, ARENA.maxZ, crownStep do
+		local crownH = 10 + (math.abs(math.floor(z * 0.19)) % 4) * 10
+		part(
+			folder,
+			"SkylineW_" .. math.floor(z),
+			Vector3.new(t * 0.6, crownH, crownStep - 4),
+			CFrame.new(ARENA.minX - t * 0.5, floorY + h + crownH / 2, z + crownStep * 0.5),
+			COLOR.facadeAccent
+		)
+		part(
+			folder,
+			"SkylineE_" .. math.floor(z),
+			Vector3.new(t * 0.6, crownH + 6, crownStep - 4),
+			CFrame.new(ARENA.maxX + t * 0.5, floorY + h + (crownH + 6) / 2, z + crownStep * 0.5),
+			COLOR.facadeAccent
+		)
+	end
+end
+
+--[[
+	Continuous asphalt ribbons along tactical corridors — readable street network
+	(driveable / walkable), not just building mass with leftover gaps.
+]]
+local function stampRoadSegment(
+	parent: Folder,
+	name: string,
+	a: Vector3,
+	b: Vector3,
+	width: number,
+	floorY: number
+)
+	local mid = (a + b) * 0.5
+	local len = MapMetrics.straightLine(a, b)
+	if len < 1 then
+		return
+	end
+	local yaw = math.atan2(a.X - b.X, a.Z - b.Z)
+	part(
+		parent,
+		name,
+		Vector3.new(width, 0.4, math.max(len, 1)),
+		CFrame.new(mid.X, floorY + 0.22, mid.Z) * CFrame.Angles(0, yaw, 0),
+		COLOR.asphalt,
+		Enum.Material.Asphalt
+	)
+	-- Center dashed line (visual only)
+	part(
+		parent,
+		name .. "_Mark",
+		Vector3.new(1.2, 0.15, math.max(len * 0.55, 1)),
+		CFrame.new(mid.X, floorY + 0.48, mid.Z) * CFrame.Angles(0, yaw, 0),
+		COLOR.marking,
+		Enum.Material.Neon,
+		false
+	)
+	-- Low curbs
+	local right = Vector3.new(math.cos(yaw), 0, -math.sin(yaw))
+	part(
+		parent,
+		name .. "_CurbL",
+		Vector3.new(1.5, 1.2, math.max(len, 1)),
+		CFrame.new(mid.X + right.X * (width * 0.5), floorY + 0.6, mid.Z + right.Z * (width * 0.5))
+			* CFrame.Angles(0, yaw, 0),
+		COLOR.curb
+	)
+	part(
+		parent,
+		name .. "_CurbR",
+		Vector3.new(1.5, 1.2, math.max(len, 1)),
+		CFrame.new(mid.X - right.X * (width * 0.5), floorY + 0.6, mid.Z - right.Z * (width * 0.5))
+			* CFrame.Angles(0, yaw, 0),
+		COLOR.curb
+	)
+end
+
+local function stampRoadPolyline(
+	parent: Folder,
+	namePrefix: string,
+	points: { Vector3 },
+	width: number,
+	floorY: number
+)
+	for i = 1, #points - 1 do
+		stampRoadSegment(parent, namePrefix .. "_" .. i, points[i], points[i + 1], width, floorY)
+	end
 end
 
 --[[
@@ -570,6 +770,10 @@ local function buildUrbanMassing(parent: Folder)
 	lanesFolder.Name = "LanesAndChokes"
 	lanesFolder.Parent = massing
 
+	local roadsFolder = Instance.new("Folder")
+	roadsFolder.Name = "RoadNetwork"
+	roadsFolder.Parent = massing
+
 	-- Tight street half-widths (right-ref road network feel; smokeable pinches).
 	local laneHalf = {
 		primary = 11, -- ~22 stud center avenue
@@ -618,16 +822,35 @@ local function buildUrbanMassing(parent: Folder)
 		Vector3.new(180, 0, 100),
 	}
 
+	-- Continuous asphalt street ribbons (driveable/walkable network read).
+	stampRoadPolyline(roadsFolder, "Ave_MotorcadeMarket", midLane, laneHalf.primary * 2, floorY)
+	stampRoadPolyline(roadsFolder, "Approach_GoodA", goodToA, laneHalf.approach * 2, floorY)
+	stampRoadPolyline(roadsFolder, "Approach_GoodB", goodToB, laneHalf.approach * 2, floorY)
+	stampRoadPolyline(roadsFolder, "Blvd_AtoB", aToB, laneHalf.arterial * 2, floorY)
+	stampRoadPolyline(roadsFolder, "Approach_TerrorA", terrorToA, laneHalf.approach * 2, floorY)
+	stampRoadPolyline(roadsFolder, "Approach_TerrorB", terrorToB, laneHalf.approach * 2, floorY)
+	stampRoadPolyline(roadsFolder, "Alley_West", westBypass, laneHalf.alley * 2, floorY)
+	stampRoadPolyline(roadsFolder, "Alley_East", eastBypass, laneHalf.alley * 2, floorY)
+	stampRoadPolyline(roadsFolder, "Xover_Early", earlyCrossover, laneHalf.crossover * 2, floorY)
+	stampRoadPolyline(roadsFolder, "Xover_Late", lateCrossover, laneHalf.crossover * 2, floorY)
+	stampRoadPolyline(roadsFolder, "Xover_North", northLink, laneHalf.crossover * 2, floorY)
+
 	-- Spawn / objective yards only — NOT large empty plazas.
+	-- Includes discrete sniper-tower footprints so massing leaves them open.
 	local clearPads = {
 		{ x = 0, z = -500, hw = 22, hd = 22 }, -- Motorcade
 		{ x = 0, z = -50, hw = 24, hd = 24 }, -- Market
 		{ x = -385, z = 0, hw = 44, hd = 38 }, -- Consulate yard
 		{ x = 385, z = 0, hw = 44, hd = 38 }, -- Precinct yard
-		{ x = -150, z = -260, hw = 22, hd = 20 }, -- vantages
+		{ x = -150, z = -260, hw = 22, hd = 20 }, -- approach vantages
 		{ x = 150, z = -260, hw = 22, hd = 20 },
 		{ x = -280, z = -120, hw = 20, hd = 22 },
 		{ x = 280, z = -120, hw = 20, hd = 22 },
+		{ x = -64, z = -320, hw = 16, hd = 16 }, -- discrete ladder snipes
+		{ x = 64, z = -320, hw = 16, hd = 16 },
+		{ x = -96, z = -20, hw = 16, hd = 16 },
+		{ x = 96, z = -20, hw = 16, hd = 16 },
+		{ x = -48, z = -220, hw = 16, hd = 16 }, -- off mid avenue
 	}
 
 	local function isPlayableCorridor(px: number, pz: number): boolean
@@ -683,12 +906,12 @@ local function buildUrbanMassing(parent: Folder)
 			local cz = z + pitch * 0.5
 			if isPlayableCorridor(cx, cz) then
 				streetIdx += 1
-				-- Thin asphalt deck on playable streets (visual road network)
+				-- Intersection / lane fill pads (road ribbons carry the main asphalt)
 				part(
 					lanesFolder,
-					"Street_" .. streetIdx,
-					Vector3.new(pitch - 2, 0.35, pitch - 2),
-					CFrame.new(cx, floorY + 0.2, cz),
+					"StreetPad_" .. streetIdx,
+					Vector3.new(pitch - 4, 0.3, pitch - 4),
+					CFrame.new(cx, floorY + 0.18, cz),
 					COLOR.asphalt,
 					Enum.Material.Asphalt,
 					false
@@ -841,7 +1064,7 @@ local function buildVantages(parent: Folder)
 	folder.Parent = parent
 
 	-- Two rooftop + two window angles onto main routes; no dual-house oversights.
-	-- Floors raised so vantages match canyon height (no low-roof peek network).
+	-- Access is discrete TrussPart ladders (not free stair ramps across roofs).
 	vantageBuilding(
 		folder,
 		"VantageWestApproach",
@@ -849,7 +1072,7 @@ local function buildVantages(parent: Folder)
 		Vector3.new(30, 0, 28),
 		4,
 		Vector3.new(1, 0, 0),
-		Vector3.new(-100, 0, -260)
+		Vector3.new(1, 0, 0) -- ladder on street-facing east face
 	)
 	vantageBuilding(
 		folder,
@@ -858,7 +1081,7 @@ local function buildVantages(parent: Folder)
 		Vector3.new(30, 0, 28),
 		4,
 		Vector3.new(-1, 0, 0),
-		Vector3.new(100, 0, -260)
+		Vector3.new(-1, 0, 0)
 	)
 	vantageBuilding(
 		folder,
@@ -867,7 +1090,7 @@ local function buildVantages(parent: Folder)
 		Vector3.new(28, 0, 30),
 		5,
 		Vector3.new(0, 0, 1),
-		Vector3.new(-240, 0, -120)
+		Vector3.new(0, 0, 1)
 	)
 	vantageBuilding(
 		folder,
@@ -876,8 +1099,54 @@ local function buildVantages(parent: Folder)
 		Vector3.new(28, 0, 30),
 		5,
 		Vector3.new(0, 0, 1),
-		Vector3.new(240, 0, -120)
+		Vector3.new(0, 0, 1)
 	)
+
+	-- Extra discrete sniper towers on selected parcels only (not every roof).
+	-- Isolated decks + one ladder each — no rooftop connections.
+	local sniperSites = {
+		{
+			name = "SniperMidWest",
+			pos = Vector3.new(-64, 0, -320),
+			facing = Vector3.new(1, 0, 0),
+			floors = 5,
+		},
+		{
+			name = "SniperMidEast",
+			pos = Vector3.new(64, 0, -320),
+			facing = Vector3.new(-1, 0, 0),
+			floors = 5,
+		},
+		{
+			name = "SniperMarketNW",
+			pos = Vector3.new(-96, 0, -20),
+			facing = Vector3.new(0, 0, -1),
+			floors = 4,
+		},
+		{
+			name = "SniperMarketNE",
+			pos = Vector3.new(96, 0, -20),
+			facing = Vector3.new(0, 0, -1),
+			floors = 4,
+		},
+		{
+			name = "SniperSouthBlvd",
+			pos = Vector3.new(-48, 0, -220),
+			facing = Vector3.new(1, 0, 0),
+			floors = 4,
+		},
+	}
+	for _, site in sniperSites do
+		vantageBuilding(
+			folder,
+			site.name,
+			site.pos,
+			Vector3.new(26, 0, 26),
+			site.floors,
+			site.facing,
+			site.facing
+		)
+	end
 end
 
 function MapService.build()
@@ -888,9 +1157,9 @@ function MapService.build()
 
 	local baseplate = Workspace:FindFirstChild("Baseplate")
 	if baseplate and baseplate:IsA("BasePart") then
-		-- ~800×600 footprint with margin
-		baseplate.Size = Vector3.new(1000, 2, 800)
-		baseplate.Position = Vector3.new(0, -1, -180)
+		-- Cover arena + perimeter wall thickness
+		baseplate.Size = Vector3.new(960, 2, 820)
+		baseplate.Position = Vector3.new(0, -1, -170)
 		baseplate.Color = COLOR.asphalt
 		baseplate.Material = Enum.Material.Asphalt
 	end
@@ -931,6 +1200,7 @@ function MapService.build()
 		pathRibbon(pathsFolder, path.name, path.points)
 	end
 
+	buildPerimeterWalls(folder)
 	buildUrbanMassing(folder)
 	buildVantages(folder)
 

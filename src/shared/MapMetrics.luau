@@ -14,9 +14,11 @@
 	  Dual-contest midfield around Market
 
 	Layout philosophy: Matthew’s dense city references — small flush parcels with
-	tall towers (street canyons), only carved tactical corridors walkable. Ribbons
-	mark Motorcade → mid → each house plus A↔B arterial; MapService fills every
-	other plot with ≥52-stud massing so you cannot peek across low roofs.
+	tall towers (street canyons), continuous asphalt road ribbons between plots,
+	tall city perimeter walls sealing the arena, and discrete TrussPart ladder
+	snipes on selected roofs only (no rooftop highway). Ribbons mark Motorcade →
+	mid → each house plus A↔B arterial; MapService fills every other plot with
+	≥52-stud massing so you cannot peek across low roofs.
 
 	Rebuild the map when CaptureDuration or SprintSpeed change — those
 	define R and invalidate this blockout (see GameConfig / design §7.2).

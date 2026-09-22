@@ -57,20 +57,28 @@ southern arterial). Contest radius **R = 22 × 30 = 660**. Yellow neon
 `CaptureBoundary` marks each volume; `MapAnchor` tags name Motorcade / Market /
 Consulate / Precinct.
 
-### Layout philosophy (dense grid + tactical lanes)
+### Layout philosophy (city-first greybox)
 
-Metric distances above are unchanged. Massing follows Matthew’s city references:
+Metric distances above are unchanged. Massing follows Matthew’s city references
+and the latest city-first pass (perimeter → roads → discrete snipes):
 
+- **Perimeter walls** — ~148-stud city facade / skyline walls fully seal the arena
+  (`VIPMap.Perimeter`) so you cannot see or walk beyond the playable city
 - **Right-side parcel grid** — small ~32-stud plots, frequent corners, tight streets
   (reject left-side huge empty plots / open fields)
 - **Every non-street parcel = tall tower** (≈52–100 studs) — street canyons that block
   corner peeks and long roof sightlines; no flat grey pads
 - Buildings are **flush** (pitch = footprint) so you cannot slip between blocks
+- **Road network** — continuous asphalt ribbons + curbs + center marks along tactical
+  corridors (`VIPMap.UrbanMassing.RoadNetwork`); streets are driveable/walkable, not
+  leftover gaps in a solid building mass
 - Only named tactical corridors + costly alley bypasses are walkable (CS/Valorant lanes)
-- Market mid is a pinched crossing; roofs stay isolated vantage decks, not a rotate layer
+- Market mid is a pinched crossing
+- **Discrete ladder snipes** — TrussPart climbs on selected towers only (`VIPMap.Vantages`);
+  isolated rooftop decks, no continuous rooftop rotate (§7.5)
 
 Art is still colored Parts only — modular dress is deferred until these metrics
-pass playtest.
+pass playtest. Economy / best-of-7 / weapons expansion stays out of this PR.
 
 ## Local setup
 
@@ -102,9 +110,11 @@ Then in Roblox Studio:
 4. Press **Play** (F5) — not just open the place. The greybox is built by the
    **server** on start (`Bootstrap` → `MapService.build`). Edit mode only has the
    baseplate + spawn pad until Play runs.
-5. You should land at the Motorcade (south) and see urban massing, yellow path
-   ribbons, Consulate (blue/west) and Precinct (orange/east). Output must show
-   `[MapService] Metric VIP greybox built` and `[MapValidator] PASS`.
+5. You should land at the Motorcade (south) and see **tall perimeter facade walls**,
+   a continuous asphalt street network between dense towers, Consulate (blue/west)
+   and Precinct (orange/east), plus climbable **TrussPart ladders** on selected
+   sniper towers. Output must show `[MapService] Metric VIP greybox built` and
+   `[MapValidator] PASS`.
 
 Solo Play is enough to **see** the map. A round still needs **2 players**.
 
