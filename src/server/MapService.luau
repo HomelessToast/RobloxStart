@@ -4,11 +4,12 @@
 
 	City-first hierarchy (Matthew):
 	  1. Lay a readable orthogonal ROAD GRID first (asphalt faces between parcels)
-	  2. Fill BLOCKS between roads with dense tall buildings
+	  2. Fill BLOCKS between roads with varied-height skyline (low mid → towers)
 	  3. Cut a few secondary ALLEYS as costly bypasses
 	  4. Place spawns on road centerlines / intersections
 	  5. One intentional LOS blocker south of Market (terror) spawn
-	Then perimeter walls + discrete ladder snipes. No new game mechanics.
+	Then perimeter walls + discrete ladder snipes on elevated outliers + one
+	corner landmark perch. No new game mechanics.
 
 	RoadNetwork visuals: per-block asphalt + curb lips + dashed center marks
 	on open street only. Metric arterials stay as walkable reservations
@@ -931,12 +932,46 @@ local function streetCover(parent: Folder, x: number, z: number, name: string, y
 	part(parent, name, Vector3.new(8, 5, 3), cf, COLOR.cover)
 end
 
--- Stable height hash so rebuilds match (studs). Tall canyons block roof peeks.
+--[[
+	Intentional skyline mix (stable hash so rebuilds match). Not uniform towers.
+	Buckets (~studs):
+	  ~35% low mid-rise  28–44
+	  ~35% mid-rise      48–72
+	  ~20% tall          76–96
+	  ~10% tower        100–116
+	Landmark corner is stamped separately at 140 (taller than every parcel).
+]]
 local function parcelHeight(x: number, z: number): number
 	local h = math.abs(math.floor(x * 0.17) + math.floor(z * 0.31) * 7)
-	-- 52–100 stud towers (≈4–7 floors at 14 studs)
-	return 52 + (h % 7) * 8
+	local bucket = h % 20
+	if bucket <= 6 then
+		return 28 + (h % 5) * 4
+	elseif bucket <= 13 then
+		return 48 + (h % 7) * 4
+	elseif bucket <= 17 then
+		return 76 + (h % 6) * 4
+	end
+	return 100 + (h % 5) * 4
 end
+
+type ParcelRecord = {
+	cx: number,
+	cz: number,
+	footX: number,
+	footZ: number,
+	height: number,
+	namePrefix: string,
+}
+
+-- Landmark SW corner (between X=-400/−300 and Z=-500/−400). Tallest climbable perch.
+local LANDMARK = {
+	cx = -350,
+	cz = -450,
+	footX = 56,
+	footZ = 52,
+	shellH = 116,
+	crownH = 24, -- total 140 — above max parcel tower (116)
+}
 
 local function stampTallParcel(
 	parent: Folder,
@@ -946,9 +981,9 @@ local function stampTallParcel(
 	footX: number,
 	footZ: number,
 	floorY: number
-)
+): number?
 	if footX < 10 or footZ < 10 then
-		return
+		return nil
 	end
 	local h = parcelHeight(cx, cz)
 	local style = (math.abs(math.floor(cx) + math.floor(cz)) % 5)
@@ -965,7 +1000,7 @@ local function stampTallParcel(
 	-- so they never spill onto the reserved road corridors.
 	if style == 0 and footX >= 36 and footZ >= 36 then
 		local half = footX * 0.5
-		local h2 = h - 8
+		local h2 = math.max(h - 8, 20)
 		part(
 			parent,
 			namePrefix .. "_A",
@@ -994,16 +1029,16 @@ local function stampTallParcel(
 		part(
 			parent,
 			namePrefix .. "_Wing",
-			Vector3.new(footX * 0.55, h - 12, footZ * 0.45),
-			CFrame.new(cx - footX * 0.225, floorY + (h - 12) / 2, cz + footZ * 0.275),
+			Vector3.new(footX * 0.55, math.max(h - 12, 16), footZ * 0.45),
+			CFrame.new(cx - footX * 0.225, floorY + math.max(h - 12, 16) / 2, cz + footZ * 0.275),
 			COLOR.brick,
 			Enum.Material.Brick
 		)
 		part(
 			parent,
 			namePrefix .. "_Fill",
-			Vector3.new(footX * 0.45, h - 20, footZ * 0.45),
-			CFrame.new(cx + footX * 0.275, floorY + (h - 20) / 2, cz + footZ * 0.275),
+			Vector3.new(footX * 0.45, math.max(h - 20, 14), footZ * 0.45),
+			CFrame.new(cx + footX * 0.275, floorY + math.max(h - 20, 14) / 2, cz + footZ * 0.275),
 			COLOR.wall
 		)
 	else
@@ -1015,6 +1050,204 @@ local function stampTallParcel(
 			color,
 			mat
 		)
+	end
+	return h
+end
+
+-- Ladder face toward the nearest ortho road (street-side climb, not alley guts).
+local function nearestRoadFacing(
+	cx: number,
+	cz: number,
+	footX: number,
+	footZ: number
+): (Vector3, Vector3)
+	local bestDist = math.huge
+	local facing = Vector3.new(1, 0, 0)
+	for _, x in GRID_XS do
+		local d = math.abs(cx - x)
+		if d < bestDist then
+			bestDist = d
+			facing = if x >= cx then Vector3.new(1, 0, 0) else Vector3.new(-1, 0, 0)
+		end
+	end
+	for _, z in GRID_ZS do
+		local d = math.abs(cz - z)
+		if d < bestDist then
+			bestDist = d
+			facing = if z >= cz then Vector3.new(0, 0, 1) else Vector3.new(0, 0, -1)
+		end
+	end
+	local base =
+		Vector3.new(cx + facing.X * (footX * 0.5 + 1), 0, cz + facing.Z * (footZ * 0.5 + 1))
+	return base, facing
+end
+
+--[[
+	SW-corner landmark — taller than every parcel tower, climbable sniper perch
+	with a real height advantage over mid-rises. Isolated deck (no roof bridges).
+]]
+local function buildLandmarkTower(parent: Folder, floorY: number)
+	local folder = Instance.new("Folder")
+	folder.Name = "LandmarkCornerSW"
+	folder.Parent = parent
+
+	local cx = LANDMARK.cx
+	local cz = LANDMARK.cz
+	local footX = LANDMARK.footX
+	local footZ = LANDMARK.footZ
+	local shellH = LANDMARK.shellH
+	local crownH = LANDMARK.crownH
+	local totalH = shellH + crownH
+
+	part(
+		folder,
+		"Shell",
+		Vector3.new(footX, shellH, footZ),
+		CFrame.new(cx, floorY + shellH / 2, cz),
+		COLOR.brick,
+		Enum.Material.Brick
+	)
+	-- Stepped crown reads as the skyline landmark from street level.
+	part(
+		folder,
+		"Crown",
+		Vector3.new(footX * 0.58, crownH, footZ * 0.58),
+		CFrame.new(cx, floorY + shellH + crownH / 2, cz),
+		COLOR.metal,
+		Enum.Material.Metal
+	)
+	-- Sniper perch (isolated — no neighbor bridge).
+	part(
+		folder,
+		"SniperPerch",
+		Vector3.new(22, 1.2, 18),
+		CFrame.new(cx, floorY + totalH + 0.6, cz),
+		COLOR.concrete
+	)
+	-- Parapet cover so the perch has a real hold advantage, not a flat death plate.
+	part(
+		folder,
+		"PerchParapetN",
+		Vector3.new(18, 4, 1.5),
+		CFrame.new(cx, floorY + totalH + 2.5, cz - 8),
+		COLOR.cover
+	)
+	part(
+		folder,
+		"PerchParapetE",
+		Vector3.new(1.5, 4, 14),
+		CFrame.new(cx + 9, floorY + totalH + 2.5, cz),
+		COLOR.cover
+	)
+	local marker = part(
+		folder,
+		"LandmarkMarker",
+		Vector3.new(6, 1, 6),
+		CFrame.new(cx, floorY + totalH + 1.5, cz),
+		COLOR.boundary,
+		Enum.Material.Neon,
+		false
+	)
+	billboard(marker, "LANDMARK PERCH", 6)
+
+	-- Ladder on east face toward city interior (costly climb, discrete access).
+	local ladderBase = Vector3.new(cx + footX * 0.5 + 1, 0, cz)
+	climbLadder(folder, "LandmarkLadder", ladderBase, totalH, Vector3.new(1, 0, 0))
+end
+
+--[[
+	Attach TrussPart ladders only to parcels that stand clearly above local
+	neighbors — elevated outliers, not every flat roof. Caps count so roofs
+	stay discrete snipes (§7.5), not a rotate highway.
+]]
+local function attachOutlierLadders(parent: Folder, parcels: { ParcelRecord }, floorY: number)
+	local NEIGHBOR_R = 150
+	local MARGIN = 16 -- must beat local neighbor average by this many studs
+	local MIN_HEIGHT = 60 -- low mid-rises never get ladders
+	local MAX_LADDERS = 7
+	local MIN_SPACING = 90 -- keep snipes discrete across the city
+
+	type Candidate = { parcel: ParcelRecord, advantage: number }
+	local candidates: { Candidate } = {}
+
+	for _, p in parcels do
+		-- Skip anything too close to the landmark (it owns that corner).
+		if math.abs(p.cx - LANDMARK.cx) < 80 and math.abs(p.cz - LANDMARK.cz) < 80 then
+			continue
+		end
+		if p.height < MIN_HEIGHT then
+			continue
+		end
+		local sumN = 0
+		local neighborCount = 0
+		for _, q in parcels do
+			if q ~= p then
+				local dx = p.cx - q.cx
+				local dz = p.cz - q.cz
+				if math.sqrt(dx * dx + dz * dz) <= NEIGHBOR_R then
+					neighborCount += 1
+					sumN += q.height
+				end
+			end
+		end
+		if neighborCount >= 2 then
+			local avgN = sumN / neighborCount
+			if p.height >= avgN + MARGIN then
+				table.insert(candidates, { parcel = p, advantage = p.height - avgN })
+			end
+		end
+	end
+
+	table.sort(candidates, function(a, b)
+		if a.advantage == b.advantage then
+			return a.parcel.height > b.parcel.height
+		end
+		return a.advantage > b.advantage
+	end)
+
+	local snipes = Instance.new("Folder")
+	snipes.Name = "OutlierSnipes"
+	snipes.Parent = parent
+
+	local placed: { ParcelRecord } = {}
+	for _, c in candidates do
+		if #placed >= MAX_LADDERS then
+			break
+		end
+		local p = c.parcel
+		local tooClose = false
+		for _, other in placed do
+			local dx = p.cx - other.cx
+			local dz = p.cz - other.cz
+			if math.sqrt(dx * dx + dz * dz) < MIN_SPACING then
+				tooClose = true
+				break
+			end
+		end
+		if tooClose then
+			continue
+		end
+
+		local folder = Instance.new("Folder")
+		folder.Name = p.namePrefix .. "_OutlierSnipe"
+		folder.Parent = snipes
+
+		-- Small isolated deck on the roof (no bridges to neighbors).
+		local deckX = math.min(p.footX - 6, 14)
+		local deckZ = math.min(p.footZ - 6, 12)
+		if deckX >= 8 and deckZ >= 8 then
+			part(
+				folder,
+				"SniperDeck",
+				Vector3.new(deckX, 1, deckZ),
+				CFrame.new(p.cx, floorY + p.height + 0.5, p.cz),
+				COLOR.metal,
+				Enum.Material.Metal
+			)
+		end
+		local base, facing = nearestRoadFacing(p.cx, p.cz, p.footX, p.footZ)
+		climbLadder(folder, "OutlierLadder", base, p.height, facing)
+		table.insert(placed, p)
 	end
 end
 
@@ -1302,10 +1535,11 @@ local function buildUrbanMassing(parent: Folder)
 		end
 	end
 
-	-- Reserved sites: safe-house clearings + discrete ladder-snipe footprints
-	-- + the single Market LOS blocker island (see stamp below).
+	-- Reserved sites: safe-house clearings + approach-vantage footprints
+	-- + SW landmark footprint + the single Market LOS blocker island.
 	-- Consulate plaza is intentionally larger/more open than Precinct courtyard.
 	-- Spawns (Motorcade / Market) are ON the grid roads — no clearPad plaza needed.
+	-- Extra sniper pads removed: ladders now attach to elevated parcel outliers.
 	local clearPads = {
 		{ x = -385, z = 0, hw = 56, hd = 50 }, -- Consulate open plaza
 		{ x = 385, z = 0, hw = 50, hd = 46 }, -- Precinct tighter courtyard
@@ -1313,11 +1547,7 @@ local function buildUrbanMassing(parent: Folder)
 		{ x = 150, z = -260, hw = 18, hd = 16 },
 		{ x = -280, z = -120, hw = 16, hd = 18 },
 		{ x = 280, z = -120, hw = 16, hd = 18 },
-		{ x = -64, z = -320, hw = 14, hd = 14 }, -- discrete ladder snipes
-		{ x = 64, z = -320, hw = 14, hd = 14 },
-		{ x = -96, z = -20, hw = 14, hd = 14 },
-		{ x = 96, z = -20, hw = 14, hd = 14 },
-		{ x = -48, z = -220, hw = 14, hd = 14 },
+		{ x = LANDMARK.cx, z = LANDMARK.cz, hw = 36, hd = 34 }, -- SW landmark
 		-- One intentional LOS island south of Market on the mid avenue.
 		{ x = 0, z = -145, hw = 26, hd = 20 },
 	}
@@ -1363,7 +1593,30 @@ local function buildUrbanMassing(parent: Folder)
 
 	----------------------------------------------------------------
 	-- 2. FILL BLOCKS between roads — buildings sit on parcels, not roads
+	--    Heights vary (low mid → tower); ladders only on elevated outliers.
 	----------------------------------------------------------------
+	local parcels: { ParcelRecord } = {}
+	local function recordParcel(
+		namePrefix: string,
+		cx: number,
+		cz: number,
+		footX: number,
+		footZ: number,
+		h: number?
+	)
+		if h == nil then
+			return
+		end
+		table.insert(parcels, {
+			cx = cx,
+			cz = cz,
+			footX = footX,
+			footZ = footZ,
+			height = h,
+			namePrefix = namePrefix,
+		})
+	end
+
 	local idx = 0
 	for i = 1, #GRID_XS - 1 do
 		for j = 1, #GRID_ZS - 1 do
@@ -1382,7 +1635,7 @@ local function buildUrbanMassing(parent: Folder)
 				local cx = (left + right) * 0.5
 				local cz = (south + north) * 0.5
 
-				-- Skip parcels eaten by house yards / sniper pads / arterials.
+				-- Skip parcels eaten by house yards / landmark / arterials.
 				-- If arterial/alley cuts the block, fill leftover lobes when large.
 				if isReserved(cx, cz) then
 					local subW = footX * 0.48
@@ -1397,24 +1650,36 @@ local function buildUrbanMassing(parent: Folder)
 						local sx, sz = off[1], off[2]
 						if not isReserved(sx, sz) and subW >= 14 and subD >= 14 then
 							idx += 1
-							stampTallParcel(
+							local namePrefix = "Block_" .. idx
+							local h = stampTallParcel(
 								blocksFolder,
-								"Block_" .. idx,
+								namePrefix,
 								sx,
 								sz,
 								subW,
 								subD,
 								floorY
 							)
+							recordParcel(namePrefix, sx, sz, subW, subD, h)
 						end
 					end
 				else
 					idx += 1
-					stampTallParcel(blocksFolder, "Block_" .. idx, cx, cz, footX, footZ, floorY)
+					local namePrefix = "Block_" .. idx
+					local h =
+						stampTallParcel(blocksFolder, namePrefix, cx, cz, footX, footZ, floorY)
+					recordParcel(namePrefix, cx, cz, footX, footZ, h)
 				end
 			end
 		end
 	end
+
+	----------------------------------------------------------------
+	-- SW-corner landmark (taller than every parcel) + outlier ladders.
+	-- Ladders only on buildings that beat local neighbors — discrete snipes.
+	----------------------------------------------------------------
+	buildLandmarkTower(blocksFolder, floorY)
+	attachOutlierLadders(blocksFolder, parcels, floorY)
 
 	----------------------------------------------------------------
 	-- Exactly ONE building in front of Market (terror) spawn that
@@ -1547,7 +1812,8 @@ local function buildVantages(parent: Folder)
 	folder.Name = "Vantages"
 	folder.Parent = parent
 
-	-- Two rooftop + two window angles onto main routes; no dual-house oversights.
+	-- Four approach/window angles onto main routes; no dual-house oversights.
+	-- Extra city snipes live on elevated parcel outliers + SW landmark (massing).
 	-- Access is discrete TrussPart ladders (not free stair ramps across roofs).
 	vantageBuilding(
 		folder,
@@ -1585,52 +1851,6 @@ local function buildVantages(parent: Folder)
 		Vector3.new(0, 0, 1),
 		Vector3.new(0, 0, 1)
 	)
-
-	-- Extra discrete sniper towers on selected parcels only (not every roof).
-	-- Isolated decks + one ladder each — no rooftop connections.
-	local sniperSites = {
-		{
-			name = "SniperMidWest",
-			pos = Vector3.new(-64, 0, -320),
-			facing = Vector3.new(1, 0, 0),
-			floors = 5,
-		},
-		{
-			name = "SniperMidEast",
-			pos = Vector3.new(64, 0, -320),
-			facing = Vector3.new(-1, 0, 0),
-			floors = 5,
-		},
-		{
-			name = "SniperMarketNW",
-			pos = Vector3.new(-96, 0, -20),
-			facing = Vector3.new(0, 0, -1),
-			floors = 4,
-		},
-		{
-			name = "SniperMarketNE",
-			pos = Vector3.new(96, 0, -20),
-			facing = Vector3.new(0, 0, -1),
-			floors = 4,
-		},
-		{
-			name = "SniperSouthBlvd",
-			pos = Vector3.new(-48, 0, -220),
-			facing = Vector3.new(1, 0, 0),
-			floors = 4,
-		},
-	}
-	for _, site in sniperSites do
-		vantageBuilding(
-			folder,
-			site.name,
-			site.pos,
-			Vector3.new(26, 0, 26),
-			site.floors,
-			site.facing,
-			site.facing
-		)
-	end
 end
 
 function MapService.build()

@@ -67,17 +67,20 @@ Metric distances above are unchanged. Massing follows a **real city grid** hiera
    Asphalt + curb lips stop at parcel/junction edges; dashed center marks only on
    open street faces — no neon/curb ribbons piercing towers. Metric path corridors
    stay reserved for contest timing without diagonal road stamps through buildings.
-2. **Blocks between roads** — tall towers (≈52–100 studs) fill parcels **inset** from
-   road edges (~68-stud building footprints). Dense enough to block open-field peeks;
-   buildings surround the streets.
+2. **Blocks between roads** — varied skyline heights fill parcels **inset** from
+   road edges (~68-stud footprints): low mid-rise **28–44**, mid **48–72**, tall
+   **76–96**, tower **100–116**, plus one **SW corner landmark** at **140** studs
+   (`LandmarkCornerSW` near (−350, −450)) with a climbable sniper perch.
 3. **Alleys** — narrower (**12-stud**) secondary cuts as costly bypasses.
 4. **Spawns on roads** — Motorcade / Market sit on X=0 intersections. Exactly **one**
    greybox mass (`TerrorSpawnLOSBlocker` at `(0, -145)`) sits south of Market so there
    is no direct round-start LOS to Motorcade; flanks use adjacent streets.
 5. **Perimeter walls** — ~148-stud city facade / skyline walls seal the arena
    (`VIPMap.Perimeter`).
-6. **Discrete ladder snipes** — TrussPart climbs on selected towers only
-   (`VIPMap.Vantages`); isolated rooftop decks, no continuous rooftop rotate (§7.5).
+6. **Discrete ladder snipes** — TrussPart climbs on **elevated parcel outliers**
+   (taller than local neighbors by ≥16 studs, capped), four approach vantages, and
+   the SW landmark perch. Isolated rooftop decks only — no continuous rooftop
+   rotate (§7.5).
 
 Art is still colored Parts only — modular dress is deferred until these metrics
 pass playtest. Economy / best-of-7 / weapons expansion stays out of this PR.
@@ -113,9 +116,10 @@ Then in Roblox Studio:
    **server** on start (`Bootstrap` → `MapService.build`). Edit mode only has the
    baseplate + spawn pad until Play runs.
 5. You should land at the Motorcade (south) **on the street**, see a readable
-   **orthogonal asphalt grid** with dense towers on the blocks between roads,
+   **orthogonal asphalt grid** with a varied skyline on the blocks between roads,
    tall perimeter facade walls, Consulate (blue/west) and Precinct (orange/east),
-   plus climbable **TrussPart ladders** on selected sniper towers. Output must show
+   a SW **landmark perch**, plus climbable **TrussPart ladders** on elevated
+   outlier towers (not every roof). Output must show
    `[MapService] Metric VIP greybox built` and `[MapValidator] PASS`.
 
 Solo Play is enough to **see** the map. A round still needs **2 players**.
