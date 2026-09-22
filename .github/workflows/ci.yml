@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    name: Lint, format, build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rokit
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf \
+            https://raw.githubusercontent.com/rojo-rbx/rokit/main/scripts/install.sh | bash
+          echo "$HOME/.rokit/bin" >> "$GITHUB_PATH"
+
+      - name: Install pinned tools
+        run: rokit install --no-trust-check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Report tool versions
+        run: |
+          rojo --version
+          selene --version
+          stylua --version
+
+      - name: StyLua
+        run: stylua --check src/
+
+      - name: Selene
+        run: selene src/
+
+      - name: Rojo build smoke test
+        run: |
+          mkdir -p build
+          rojo build default.project.json --output build/game.rbxl
+          test -s build/game.rbxl
+
+      - name: Upload built place
+        uses: actions/upload-artifact@v4
+        with:
+          name: game-place
+          path: build/game.rbxl
+          if-no-files-found: error
