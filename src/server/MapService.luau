@@ -21,9 +21,14 @@
 	- Workspace.VIPMap / SafeHouseA|B / CaptureVolume (+ SafeHouseId attribute)
 	- MapService.getCaptureVolume / getSpawnCFrame / pointInPart
 
+	Safe-house identity (site-local only — do not move MapAnchors):
+	- Consulate (A): open diplomatic plaza — planters, bollards, sparse cover
+	- Precinct (B): tighter police courtyard — jersey barriers, denser cover
+
 	Also: MapAnchor tags, CaptureBoundary markers, costly choke bypasses,
 	tall city perimeter walls, discrete TrussPart ladder climbs onto selected
 	roofs (no rooftop highway), overhead arcade, no lethal VIP falls.
+	RoadNetwork / spawn LOS owned elsewhere — do not reshape those here.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
@@ -60,6 +65,10 @@ local COLOR = {
 	glass = Color3.fromRGB(140, 190, 220),
 	path = Color3.fromRGB(180, 160, 60),
 	choke = Color3.fromRGB(80, 80, 85),
+	plaza = Color3.fromRGB(130, 128, 118),
+	planter = Color3.fromRGB(70, 88, 62),
+	vehicle = Color3.fromRGB(45, 48, 55),
+	barrier = Color3.fromRGB(160, 120, 50),
 }
 
 -- Playable arena AABB (parcel grid ± margin). Perimeter walls seal this volume.
@@ -183,31 +192,36 @@ local function pathRibbon(parent: Folder, pathName: string, points: { Vector3 })
 	end
 end
 
-local function safeHouse(parent: Folder, id: string, center: Vector3, displayName: string)
-	local folder = Instance.new("Folder")
-	folder.Name = "SafeHouse" .. id
-	folder.Parent = parent
-
+--[[
+	Shared capture contracts (do not drift): CaptureVolume + SafeHouseId,
+	CaptureBoundary + billboard, MapAnchor at MapMetrics center. Dual entrances
+	(south + west). Site identity is plaza vs courtyard massing only.
+]]
+local function captureContracts(
+	folder: Folder,
+	id: string,
+	center: Vector3,
+	displayName: string,
+	houseColor: Color3,
+	floorSize: Vector3
+)
 	local cfg = GameConfig.Map
-	local interior = cfg.HouseInteriorSize
 	local floorY = MapMetrics.FloorY
-	local houseColor = if id == "A" then COLOR.houseA else COLOR.houseB
 
 	local floor = part(
 		folder,
 		"Floor",
-		Vector3.new(interior.X, 1, interior.Z),
+		floorSize,
 		CFrame.new(center.X, floorY, center.Z),
 		houseColor,
 		Enum.Material.Slate
 	)
 	floor:SetAttribute("SafeHouseId", id)
 
-	-- Visible capture boundary (yellow neon stripe)
 	local stripe = part(
 		folder,
 		"CaptureBoundary",
-		Vector3.new(interior.X - 4, 0.25, interior.Z - 4),
+		Vector3.new(floorSize.X - 4, 0.25, floorSize.Z - 4),
 		CFrame.new(center.X, floorY + 0.65, center.Z),
 		COLOR.boundary,
 		Enum.Material.Neon,
@@ -215,78 +229,6 @@ local function safeHouse(parent: Folder, id: string, center: Vector3, displayNam
 	)
 	stripe:SetAttribute("SafeHouseId", id)
 	billboard(stripe, displayName .. " CAPTURE", 10)
-
-	local wallH = interior.Y
-	local wallT = 2
-	local halfX = interior.X / 2
-	local halfZ = interior.Z / 2
-
-	-- North solid; south + west doorways (dual entrances, not mutually visible)
-	part(
-		folder,
-		"WallNorth",
-		Vector3.new(interior.X, wallH, wallT),
-		CFrame.new(center.X, floorY + wallH / 2, center.Z - halfZ),
-		COLOR.wall
-	)
-	part(
-		folder,
-		"WallSouthL",
-		Vector3.new(interior.X * 0.32, wallH, wallT),
-		CFrame.new(center.X - halfX * 0.58, floorY + wallH / 2, center.Z + halfZ),
-		COLOR.wall
-	)
-	part(
-		folder,
-		"WallSouthR",
-		Vector3.new(interior.X * 0.32, wallH, wallT),
-		CFrame.new(center.X + halfX * 0.58, floorY + wallH / 2, center.Z + halfZ),
-		COLOR.wall
-	)
-	part(
-		folder,
-		"WallEast",
-		Vector3.new(wallT, wallH, interior.Z),
-		CFrame.new(center.X + halfX, floorY + wallH / 2, center.Z),
-		COLOR.wall
-	)
-	part(
-		folder,
-		"WallWestN",
-		Vector3.new(wallT, wallH, interior.Z * 0.32),
-		CFrame.new(center.X - halfX, floorY + wallH / 2, center.Z - halfZ * 0.58),
-		COLOR.wall
-	)
-	part(
-		folder,
-		"WallWestS",
-		Vector3.new(wallT, wallH, interior.Z * 0.32),
-		CFrame.new(center.X - halfX, floorY + wallH / 2, center.Z + halfZ * 0.58),
-		COLOR.wall
-	)
-
-	-- Interior cover for 2–3 defenders + a pistol angle
-	part(
-		folder,
-		"CoverA",
-		Vector3.new(10, 8, 3),
-		CFrame.new(center.X - 12, floorY + 4, center.Z - 8),
-		COLOR.cover
-	)
-	part(
-		folder,
-		"CoverB",
-		Vector3.new(3, 8, 12),
-		CFrame.new(center.X + 14, floorY + 4, center.Z + 6),
-		COLOR.cover
-	)
-	part(
-		folder,
-		"CoverC",
-		Vector3.new(8, 6, 8),
-		CFrame.new(center.X + 4, floorY + 3, center.Z - 14),
-		COLOR.cover
-	)
 
 	local volume = part(
 		folder,
@@ -300,7 +242,6 @@ local function safeHouse(parent: Folder, id: string, center: Vector3, displayNam
 	volume.Transparency = 0.82
 	volume:SetAttribute("SafeHouseId", id)
 
-	-- Named house anchor (center marker)
 	local anchor = part(
 		folder,
 		"Anchor",
@@ -311,8 +252,375 @@ local function safeHouse(parent: Folder, id: string, center: Vector3, displayNam
 		false
 	)
 	tagAnchor(anchor, displayName, if id == "A" then "SafeHouseA" else "SafeHouseB", id)
+end
+
+--[[
+	CONSULATE (A) — open diplomatic plaza.
+	Breathing room around the pavilion; low planters / bollards / cars as flank
+	cover; open center for hold movement; angles in from the plaza rim.
+]]
+local function buildConsulate(parent: Folder, center: Vector3)
+	local folder = Instance.new("Folder")
+	folder.Name = "SafeHouseA"
+	folder.Parent = parent
+
+	local id = Enums.SafeHouseId.A
+	local floorY = MapMetrics.FloorY
+	local interior = GameConfig.Map.HouseInteriorSize
+	local halfX = interior.X / 2
+	local halfZ = interior.Z / 2
+	local wallH = 14 -- lower pavilion walls than Precinct (open read)
+	local wallT = 2
+
+	-- Wide plaza slab (destination clearing, not another canyon block)
+	part(
+		folder,
+		"PlazaPaving",
+		Vector3.new(108, 0.5, 96),
+		CFrame.new(center.X, floorY + 0.2, center.Z),
+		COLOR.plaza,
+		Enum.Material.Concrete
+	)
+
+	captureContracts(folder, id, center, "CONSULATE", COLOR.houseA, interior)
+
+	-- Pavilion shell: solid north; south + west openings (dual entrances)
+	part(
+		folder,
+		"WallNorth",
+		Vector3.new(interior.X, wallH, wallT),
+		CFrame.new(center.X, floorY + wallH / 2, center.Z - halfZ),
+		COLOR.houseA
+	)
+	part(
+		folder,
+		"WallSouthL",
+		Vector3.new(interior.X * 0.28, wallH, wallT),
+		CFrame.new(center.X - halfX * 0.62, floorY + wallH / 2, center.Z + halfZ),
+		COLOR.houseA
+	)
+	part(
+		folder,
+		"WallSouthR",
+		Vector3.new(interior.X * 0.28, wallH, wallT),
+		CFrame.new(center.X + halfX * 0.62, floorY + wallH / 2, center.Z + halfZ),
+		COLOR.houseA
+	)
+	-- East: glass ribbon (embassy read) — still solid collision for hold edges
+	part(
+		folder,
+		"WallEast",
+		Vector3.new(wallT, wallH, interior.Z),
+		CFrame.new(center.X + halfX, floorY + wallH / 2, center.Z),
+		COLOR.glass,
+		Enum.Material.Glass
+	)
+	part(
+		folder,
+		"WallWestN",
+		Vector3.new(wallT, wallH, interior.Z * 0.28),
+		CFrame.new(center.X - halfX, floorY + wallH / 2, center.Z - halfZ * 0.62),
+		COLOR.houseA
+	)
+	part(
+		folder,
+		"WallWestS",
+		Vector3.new(wallT, wallH, interior.Z * 0.28),
+		CFrame.new(center.X - halfX, floorY + wallH / 2, center.Z + halfZ * 0.62),
+		COLOR.houseA
+	)
+	-- Light canopy (overhead cue without roof highway)
+	part(
+		folder,
+		"PavilionCanopy",
+		Vector3.new(interior.X * 0.7, 1.2, interior.Z * 0.55),
+		CFrame.new(center.X, floorY + wallH + 0.6, center.Z - 4),
+		COLOR.metal,
+		Enum.Material.Metal
+	)
+
+	-- Interior: sparse cover (open hold — bodyguards use edges, not a bunker)
+	part(
+		folder,
+		"DeskCover",
+		Vector3.new(14, 5, 3),
+		CFrame.new(center.X - 10, floorY + 2.5, center.Z - 10),
+		COLOR.wood,
+		Enum.Material.Wood
+	)
+	part(
+		folder,
+		"ColumnCover",
+		Vector3.new(4, 10, 4),
+		CFrame.new(center.X + 12, floorY + 5, center.Z + 4),
+		COLOR.concrete
+	)
+
+	-- Plaza rim: planters + bollards + cars (flank cover / terror angles)
+	local planterOffsets = {
+		{ -42, -28 },
+		{ -42, 28 },
+		{ 42, -28 },
+		{ 42, 28 },
+		{ -20, -40 },
+		{ 20, -40 },
+	}
+	for i, off in planterOffsets do
+		part(
+			folder,
+			"Planter" .. i,
+			Vector3.new(10, 4, 6),
+			CFrame.new(center.X + off[1], floorY + 2, center.Z + off[2]),
+			COLOR.planter,
+			Enum.Material.Grass
+		)
+	end
+	for i = -2, 2 do
+		part(
+			folder,
+			"BollardS" .. i,
+			Vector3.new(1.5, 3.5, 1.5),
+			CFrame.new(center.X + i * 8, floorY + 1.75, center.Z + 46),
+			COLOR.metal,
+			Enum.Material.Metal
+		)
+	end
+	-- Greybox vehicles as soft cover on plaza approaches
+	part(
+		folder,
+		"EmbassyCarN",
+		Vector3.new(18, 5, 8),
+		CFrame.new(center.X - 30, floorY + 2.5, center.Z - 36),
+		COLOR.vehicle,
+		Enum.Material.Metal
+	)
+	part(
+		folder,
+		"EmbassyCarS",
+		Vector3.new(18, 5, 8),
+		CFrame.new(center.X + 28, floorY + 2.5, center.Z + 34),
+		COLOR.vehicle,
+		Enum.Material.Metal
+	)
+	-- Low plaza walls (destination cue, not canyon towers)
+	part(
+		folder,
+		"PlazaWallN",
+		Vector3.new(70, 5, 2),
+		CFrame.new(center.X, floorY + 2.5, center.Z - 46),
+		COLOR.concrete
+	)
+	part(
+		folder,
+		"PlazaWallE",
+		Vector3.new(2, 5, 50),
+		CFrame.new(center.X + 52, floorY + 2.5, center.Z),
+		COLOR.concrete
+	)
 
 	return folder
+end
+
+--[[
+	PRECINCT (B) — tighter police courtyard.
+	Higher courtyard walls, jersey barriers, parked cruisers — denser cover,
+	shorter sightlines, still room to rotate inside the yard.
+]]
+local function buildPrecinct(parent: Folder, center: Vector3)
+	local folder = Instance.new("Folder")
+	folder.Name = "SafeHouseB"
+	folder.Parent = parent
+
+	local id = Enums.SafeHouseId.B
+	local floorY = MapMetrics.FloorY
+	local interior = GameConfig.Map.HouseInteriorSize
+	local halfX = interior.X / 2
+	local halfZ = interior.Z / 2
+	local wallH = interior.Y -- taller shell than Consulate pavilion
+	local wallT = 2.5
+	local yardH = 10 -- courtyard enclosure
+
+	-- Courtyard slab (smaller footprint than Consulate plaza — tighter hold)
+	part(
+		folder,
+		"YardPaving",
+		Vector3.new(92, 0.5, 84),
+		CFrame.new(center.X, floorY + 0.2, center.Z),
+		COLOR.asphalt,
+		Enum.Material.Asphalt
+	)
+
+	captureContracts(folder, id, center, "PRECINCT", COLOR.houseB, interior)
+
+	-- Station shell: solid north + east; south + west gate gaps
+	part(
+		folder,
+		"WallNorth",
+		Vector3.new(interior.X, wallH, wallT),
+		CFrame.new(center.X, floorY + wallH / 2, center.Z - halfZ),
+		COLOR.houseB
+	)
+	part(
+		folder,
+		"WallSouthL",
+		Vector3.new(interior.X * 0.36, wallH, wallT),
+		CFrame.new(center.X - halfX * 0.55, floorY + wallH / 2, center.Z + halfZ),
+		COLOR.houseB
+	)
+	part(
+		folder,
+		"WallSouthR",
+		Vector3.new(interior.X * 0.36, wallH, wallT),
+		CFrame.new(center.X + halfX * 0.55, floorY + wallH / 2, center.Z + halfZ),
+		COLOR.houseB
+	)
+	part(
+		folder,
+		"WallEast",
+		Vector3.new(wallT, wallH, interior.Z),
+		CFrame.new(center.X + halfX, floorY + wallH / 2, center.Z),
+		COLOR.houseB
+	)
+	part(
+		folder,
+		"WallWestN",
+		Vector3.new(wallT, wallH, interior.Z * 0.36),
+		CFrame.new(center.X - halfX, floorY + wallH / 2, center.Z - halfZ * 0.55),
+		COLOR.houseB
+	)
+	part(
+		folder,
+		"WallWestS",
+		Vector3.new(wallT, wallH, interior.Z * 0.36),
+		CFrame.new(center.X - halfX, floorY + wallH / 2, center.Z + halfZ * 0.55),
+		COLOR.houseB
+	)
+	-- Flat station roof edge (destination mass, not a rotate deck)
+	part(
+		folder,
+		"StationRoof",
+		Vector3.new(interior.X + 2, 2, interior.Z + 2),
+		CFrame.new(center.X, floorY + wallH + 1, center.Z),
+		COLOR.metal,
+		Enum.Material.Metal
+	)
+
+	-- Dense interior cover (tighter pistol fight than Consulate)
+	part(
+		folder,
+		"DeskBank",
+		Vector3.new(16, 6, 4),
+		CFrame.new(center.X - 8, floorY + 3, center.Z - 6),
+		COLOR.wood,
+		Enum.Material.Wood
+	)
+	part(
+		folder,
+		"FilingCover",
+		Vector3.new(4, 9, 14),
+		CFrame.new(center.X + 14, floorY + 4.5, center.Z + 2),
+		COLOR.cover
+	)
+	part(
+		folder,
+		"CellBlock",
+		Vector3.new(10, 8, 10),
+		CFrame.new(center.X + 2, floorY + 4, center.Z - 16),
+		COLOR.metal,
+		Enum.Material.Metal
+	)
+
+	-- Courtyard walls (U-shape: open toward west approach / south gate)
+	part(
+		folder,
+		"YardWallN",
+		Vector3.new(88, yardH, 3),
+		CFrame.new(center.X, floorY + yardH / 2, center.Z - 40),
+		COLOR.wall
+	)
+	part(
+		folder,
+		"YardWallE",
+		Vector3.new(3, yardH, 78),
+		CFrame.new(center.X + 44, floorY + yardH / 2, center.Z),
+		COLOR.wall
+	)
+	part(
+		folder,
+		"YardWallS_L",
+		Vector3.new(28, yardH, 3),
+		CFrame.new(center.X - 28, floorY + yardH / 2, center.Z + 40),
+		COLOR.wall
+	)
+	part(
+		folder,
+		"YardWallS_R",
+		Vector3.new(28, yardH, 3),
+		CFrame.new(center.X + 28, floorY + yardH / 2, center.Z + 40),
+		COLOR.wall
+	)
+
+	-- Jersey barriers + parked cruisers (cover mix inside the yard)
+	local barriers = {
+		{ -24, -22, 0.3 },
+		{ -8, -26, -0.2 },
+		{ 18, -18, 0.5 },
+		{ -22, 18, -0.4 },
+		{ 10, 22, 0.2 },
+		{ 26, 8, 1.1 },
+	}
+	for i, b in barriers do
+		part(
+			folder,
+			"Jersey" .. i,
+			Vector3.new(10, 4, 2.5),
+			CFrame.new(center.X + b[1], floorY + 2, center.Z + b[2]) * CFrame.Angles(0, b[3], 0),
+			COLOR.barrier,
+			Enum.Material.Concrete
+		)
+	end
+	part(
+		folder,
+		"CruiserN",
+		Vector3.new(16, 5, 7),
+		CFrame.new(center.X - 32, floorY + 2.5, center.Z - 12),
+		COLOR.vehicle,
+		Enum.Material.Metal
+	)
+	part(
+		folder,
+		"CruiserS",
+		Vector3.new(16, 5, 7),
+		CFrame.new(center.X + 30, floorY + 2.5, center.Z + 16) * CFrame.Angles(0, 1.2, 0),
+		COLOR.vehicle,
+		Enum.Material.Metal
+	)
+	-- Checkpoint gate posts at south entrance
+	part(
+		folder,
+		"GatePostL",
+		Vector3.new(3, 12, 3),
+		CFrame.new(center.X - 8, floorY + 6, center.Z + 40),
+		COLOR.metal,
+		Enum.Material.Metal
+	)
+	part(
+		folder,
+		"GatePostR",
+		Vector3.new(3, 12, 3),
+		CFrame.new(center.X + 8, floorY + 6, center.Z + 40),
+		COLOR.metal,
+		Enum.Material.Metal
+	)
+
+	return folder
+end
+
+local function safeHouse(parent: Folder, id: string, center: Vector3, _displayName: string)
+	if id == Enums.SafeHouseId.A then
+		return buildConsulate(parent, center)
+	end
+	return buildPrecinct(parent, center)
 end
 
 --[[
@@ -994,12 +1302,13 @@ local function buildUrbanMassing(parent: Folder)
 		end
 	end
 
-	-- Reserved sites: safe-house yards + discrete ladder-snipe footprints
+	-- Reserved sites: safe-house clearings + discrete ladder-snipe footprints
 	-- + the single Market LOS blocker island (see stamp below).
+	-- Consulate plaza is intentionally larger/more open than Precinct courtyard.
 	-- Spawns (Motorcade / Market) are ON the grid roads — no clearPad plaza needed.
 	local clearPads = {
-		{ x = -385, z = 0, hw = 44, hd = 38 }, -- Consulate yard (feeds from X=-400 / Z=0 roads)
-		{ x = 385, z = 0, hw = 44, hd = 38 }, -- Precinct yard
+		{ x = -385, z = 0, hw = 56, hd = 50 }, -- Consulate open plaza
+		{ x = 385, z = 0, hw = 50, hd = 46 }, -- Precinct tighter courtyard
 		{ x = -150, z = -260, hw = 18, hd = 16 }, -- approach vantages
 		{ x = 150, z = -260, hw = 18, hd = 16 },
 		{ x = -280, z = -120, hw = 16, hd = 18 },
