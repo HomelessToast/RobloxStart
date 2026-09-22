@@ -62,15 +62,18 @@ Consulate / Precinct.
 Metric distances above are unchanged. Massing follows a **real city grid** hierarchy
 (roads → blocks → alleys), then perimeter + discrete snipes:
 
-1. **Road grid first** — orthogonal N–S / E–W asphalt corridors (**32-stud** primary
-   width) on ~**100-stud** centerlines (`VIPMap.UrbanMassing.RoadNetwork`). Continuous,
-   readable from above, walkable — not leftover gaps in a tower soup.
+1. **Road grid first** — orthogonal N–S / E–W asphalt **per block face** (**32-stud**
+   primary width) on ~**100-stud** centerlines (`VIPMap.UrbanMassing.RoadNetwork`).
+   Asphalt + curb lips stop at parcel/junction edges; dashed center marks only on
+   open street faces — no neon/curb ribbons piercing towers. Metric path corridors
+   stay reserved for contest timing without diagonal road stamps through buildings.
 2. **Blocks between roads** — tall towers (≈52–100 studs) fill parcels **inset** from
    road edges (~68-stud building footprints). Dense enough to block open-field peeks;
    buildings surround the streets.
 3. **Alleys** — narrower (**12-stud**) secondary cuts as costly bypasses.
-4. **Metric arterials** — 28-stud boulevards along path ribbons so contest timing stays
-   walkable; Motorcade / Market spawns sit on road centerlines (X=0 intersections).
+4. **Spawns on roads** — Motorcade / Market sit on X=0 intersections. Exactly **one**
+   greybox mass (`TerrorSpawnLOSBlocker` at `(0, -145)`) sits south of Market so there
+   is no direct round-start LOS to Motorcade; flanks use adjacent streets.
 5. **Perimeter walls** — ~148-stud city facade / skyline walls seal the arena
    (`VIPMap.Perimeter`).
 6. **Discrete ladder snipes** — TrussPart climbs on selected towers only

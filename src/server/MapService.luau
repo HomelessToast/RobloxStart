@@ -3,14 +3,19 @@
 	Builds the metric-correct urban greybox from MapMetrics.
 
 	City-first hierarchy (Matthew):
-	  1. Lay a readable orthogonal ROAD GRID first (continuous asphalt corridors)
+	  1. Lay a readable orthogonal ROAD GRID first (asphalt faces between parcels)
 	  2. Fill BLOCKS between roads with dense tall buildings
 	  3. Cut a few secondary ALLEYS as costly bypasses
 	  4. Place spawns on road centerlines / intersections
+	  5. One intentional LOS blocker south of Market (terror) spawn
 	Then perimeter walls + discrete ladder snipes. No new game mechanics.
 
+	RoadNetwork visuals: per-block asphalt + curb lips + dashed center marks
+	on open street only. Metric arterials stay as walkable reservations
+	(contest timing) without stamping diagonal mark/curb ribbons through towers.
+
 	Metric ribbons in MapMetrics stay the distance source of truth; primary
-	arterials follow those ribbons on top of the grid so contest timing holds.
+	path corridors remain reserved so contest timing holds on the grid.
 
 	Gameplay wiring (unchanged contracts):
 	- Workspace.VIPMap / SafeHouseA|B / CaptureVolume (+ SafeHouseId attribute)
@@ -539,10 +544,11 @@ end
 
 --[[
 	City street hierarchy:
-	  1. Orthogonal ROAD GRID — continuous asphalt corridors (readable from above)
+	  1. Orthogonal ROAD GRID — asphalt faces between intersections (parcel edges)
 	  2. BLOCKS between roads — dense tall buildings on parcels
 	  3. ALLEYS — narrow secondary cuts (costly bypasses)
-	  4. Metric arterials — wider ribbons along MapMetrics paths (contest timing)
+	  4. Metric arterials — reserved (not visually stamped diagonally)
+	  5. One LOS island south of Market on the mid avenue
 	Spawns sit on road centerlines / intersections, never inside building mass.
 ]]
 
@@ -704,7 +710,17 @@ local function stampTallParcel(
 	end
 end
 
-local function stampRoadSegment(
+--[[
+	Road visuals: asphalt decks that live only in open street corridors
+	(between parcel edges), with curb lips at the asphalt edge and short
+	dashed center marks on open block faces — never continuous neon/curb
+	ribbons that pierce building volumes.
+]]
+local function roadYaw(a: Vector3, b: Vector3): number
+	return math.atan2(a.X - b.X, a.Z - b.Z)
+end
+
+local function stampAsphaltDeck(
 	parent: Folder,
 	name: string,
 	a: Vector3,
@@ -712,49 +728,170 @@ local function stampRoadSegment(
 	width: number,
 	floorY: number
 )
-	local mid = (a + b) * 0.5
 	local len = MapMetrics.straightLine(a, b)
 	if len < 1 then
 		return
 	end
-	local yaw = math.atan2(a.X - b.X, a.Z - b.Z)
+	local mid = (a + b) * 0.5
+	local yaw = roadYaw(a, b)
 	part(
 		parent,
 		name,
-		Vector3.new(width, 0.4, math.max(len, 1)),
-		CFrame.new(mid.X, floorY + 0.22, mid.Z) * CFrame.Angles(0, yaw, 0),
+		Vector3.new(width, 0.35, math.max(len, 1)),
+		CFrame.new(mid.X, floorY + 0.18, mid.Z) * CFrame.Angles(0, yaw, 0),
 		COLOR.asphalt,
 		Enum.Material.Asphalt
 	)
-	part(
-		parent,
-		name .. "_Mark",
-		Vector3.new(1.2, 0.15, math.max(len * 0.55, 1)),
-		CFrame.new(mid.X, floorY + 0.48, mid.Z) * CFrame.Angles(0, yaw, 0),
-		COLOR.marking,
-		Enum.Material.Neon,
-		false
-	)
+end
+
+-- Short dashed center marks on open street only (inset from junctions).
+local function stampCenterDashes(
+	parent: Folder,
+	namePrefix: string,
+	a: Vector3,
+	b: Vector3,
+	floorY: number
+)
+	local len = MapMetrics.straightLine(a, b)
+	-- Need room for junction inset + at least one dash.
+	if len < 28 then
+		return
+	end
+	local yaw = roadYaw(a, b)
+	local dir = (b - a)
+	if dir.Magnitude < 1e-3 then
+		return
+	end
+	dir = dir.Unit
+	local inset = 10
+	local dashLen = 6
+	local gap = 8
+	local usable = len - inset * 2
+	local stride = dashLen + gap
+	local count = math.floor((usable + gap) / stride)
+	if count < 1 then
+		return
+	end
+	for i = 0, count - 1 do
+		local t = inset + dashLen * 0.5 + i * stride
+		if t + dashLen * 0.5 > len - inset then
+			break
+		end
+		local p = a + dir * t
+		part(
+			parent,
+			namePrefix .. "_Dash" .. i,
+			Vector3.new(1.0, 0.12, dashLen),
+			CFrame.new(p.X, floorY + 0.42, p.Z) * CFrame.Angles(0, yaw, 0),
+			COLOR.marking,
+			Enum.Material.SmoothPlastic,
+			false
+		)
+	end
+end
+
+-- Curb lips along both long edges, stopped short of junctions so they
+-- never run through crossing streets or into parcel towers.
+local function stampCurbPair(
+	parent: Folder,
+	namePrefix: string,
+	a: Vector3,
+	b: Vector3,
+	width: number,
+	floorY: number
+)
+	local len = MapMetrics.straightLine(a, b)
+	if len < 16 then
+		return
+	end
+	local yaw = roadYaw(a, b)
+	local dir = (b - a)
+	if dir.Magnitude < 1e-3 then
+		return
+	end
+	dir = dir.Unit
+	local inset = 6
+	local curbLen = len - inset * 2
+	if curbLen < 8 then
+		return
+	end
+	local mid = a + dir * (len * 0.5)
 	local right = Vector3.new(math.cos(yaw), 0, -math.sin(yaw))
+	local edge = width * 0.5 - 0.4
 	part(
 		parent,
-		name .. "_CurbL",
-		Vector3.new(1.5, 1.2, math.max(len, 1)),
-		CFrame.new(mid.X + right.X * (width * 0.5), floorY + 0.6, mid.Z + right.Z * (width * 0.5))
+		namePrefix .. "_CurbL",
+		Vector3.new(1.2, 0.9, curbLen),
+		CFrame.new(mid.X + right.X * edge, floorY + 0.45, mid.Z + right.Z * edge)
 			* CFrame.Angles(0, yaw, 0),
-		COLOR.curb
+		COLOR.curb,
+		Enum.Material.Concrete
 	)
 	part(
 		parent,
-		name .. "_CurbR",
-		Vector3.new(1.5, 1.2, math.max(len, 1)),
-		CFrame.new(mid.X - right.X * (width * 0.5), floorY + 0.6, mid.Z - right.Z * (width * 0.5))
+		namePrefix .. "_CurbR",
+		Vector3.new(1.2, 0.9, curbLen),
+		CFrame.new(mid.X - right.X * edge, floorY + 0.45, mid.Z - right.Z * edge)
 			* CFrame.Angles(0, yaw, 0),
-		COLOR.curb
+		COLOR.curb,
+		Enum.Material.Concrete
 	)
 end
 
-local function stampRoadPolyline(
+-- One open-street face between two intersections: asphalt + curbs + dashes.
+local function stampStreetFace(
+	parent: Folder,
+	name: string,
+	a: Vector3,
+	b: Vector3,
+	width: number,
+	floorY: number,
+	withMarks: boolean
+)
+	stampAsphaltDeck(parent, name, a, b, width, floorY)
+	stampCurbPair(parent, name, a, b, width, floorY)
+	if withMarks then
+		stampCenterDashes(parent, name, a, b, floorY)
+	end
+end
+
+-- Axis-aligned grid: stamp per block-face so asphalt stops at parcel edges
+-- (junction pads bridge the crossings). No full-map mega-ribbons.
+local function stampOrthoGridRoads(parent: Folder, floorY: number)
+	for _, x in GRID_XS do
+		for j = 1, #GRID_ZS - 1 do
+			local z0 = GRID_ZS[j]
+			local z1 = GRID_ZS[j + 1]
+			stampStreetFace(
+				parent,
+				string.format("NS_%d_%d", math.floor(x), math.floor(z0)),
+				Vector3.new(x, 0, z0),
+				Vector3.new(x, 0, z1),
+				ROAD_WIDTH,
+				floorY,
+				true
+			)
+		end
+	end
+	for _, z in GRID_ZS do
+		for i = 1, #GRID_XS - 1 do
+			local x0 = GRID_XS[i]
+			local x1 = GRID_XS[i + 1]
+			stampStreetFace(
+				parent,
+				string.format("EW_%d_%d", math.floor(x0), math.floor(z)),
+				Vector3.new(x0, 0, z),
+				Vector3.new(x1, 0, z),
+				ROAD_WIDTH,
+				floorY,
+				true
+			)
+		end
+	end
+end
+
+-- Narrow alleys: asphalt + curbs only (no center marks — too tight to read).
+local function stampAlleyPolyline(
 	parent: Folder,
 	namePrefix: string,
 	points: { Vector3 },
@@ -762,33 +899,16 @@ local function stampRoadPolyline(
 	floorY: number
 )
 	for i = 1, #points - 1 do
-		stampRoadSegment(parent, namePrefix .. "_" .. i, points[i], points[i + 1], width, floorY)
+		stampStreetFace(
+			parent,
+			namePrefix .. "_" .. i,
+			points[i],
+			points[i + 1],
+			width,
+			floorY,
+			false
+		)
 	end
-end
-
--- Axis-aligned full-span grid roads (the readable city lattice).
-local function stampOrthoRoadNS(
-	parent: Folder,
-	name: string,
-	x: number,
-	z0: number,
-	z1: number,
-	width: number,
-	floorY: number
-)
-	stampRoadSegment(parent, name, Vector3.new(x, 0, z0), Vector3.new(x, 0, z1), width, floorY)
-end
-
-local function stampOrthoRoadEW(
-	parent: Folder,
-	name: string,
-	z: number,
-	x0: number,
-	x1: number,
-	width: number,
-	floorY: number
-)
-	stampRoadSegment(parent, name, Vector3.new(x0, 0, z), Vector3.new(x1, 0, z), width, floorY)
 end
 
 local function buildUrbanMassing(parent: Folder)
@@ -844,33 +964,19 @@ local function buildUrbanMassing(parent: Folder)
 	}
 
 	----------------------------------------------------------------
-	-- 1. ROAD GRID FIRST — continuous orthogonal asphalt corridors
+	-- 1. ROAD GRID FIRST — per-block asphalt faces (stop at parcels)
 	----------------------------------------------------------------
-	local zMin = GRID_ZS[1]
-	local zMax = GRID_ZS[#GRID_ZS]
-	local xMin = GRID_XS[1]
-	local xMax = GRID_XS[#GRID_XS]
-
-	for _, x in GRID_XS do
-		stampOrthoRoadNS(roadsFolder, "GridNS_" .. math.floor(x), x, zMin, zMax, ROAD_WIDTH, floorY)
-	end
-	for _, z in GRID_ZS do
-		stampOrthoRoadEW(roadsFolder, "GridEW_" .. math.floor(z), z, xMin, xMax, ROAD_WIDTH, floorY)
-	end
+	stampOrthoGridRoads(roadsFolder, floorY)
 
 	----------------------------------------------------------------
-	-- Metric arterials (contest-timing boulevards) + alleys
+	-- Alleys only as RoadNetwork visuals. Metric arterials stay as
+	-- walkable reservations (onArterial) so contest timing holds, but
+	-- we do NOT stamp diagonal asphalt/mark/curb ribbons through towers.
 	----------------------------------------------------------------
-	stampRoadPolyline(roadsFolder, "Ave_MotorcadeMarket", midLane, ARTERIAL_WIDTH, floorY)
-	stampRoadPolyline(roadsFolder, "Approach_GoodA", goodToA, ARTERIAL_WIDTH, floorY)
-	stampRoadPolyline(roadsFolder, "Approach_GoodB", goodToB, ARTERIAL_WIDTH, floorY)
-	stampRoadPolyline(roadsFolder, "Blvd_AtoB", aToB, ARTERIAL_WIDTH, floorY)
-	stampRoadPolyline(roadsFolder, "Approach_TerrorA", terrorToA, ARTERIAL_WIDTH, floorY)
-	stampRoadPolyline(roadsFolder, "Approach_TerrorB", terrorToB, ARTERIAL_WIDTH, floorY)
-	stampRoadPolyline(roadsFolder, "Alley_West", westAlley, ALLEY_WIDTH, floorY)
-	stampRoadPolyline(roadsFolder, "Alley_East", eastAlley, ALLEY_WIDTH, floorY)
-	stampRoadPolyline(roadsFolder, "Alley_MidW", midAlleyW, ALLEY_WIDTH, floorY)
-	stampRoadPolyline(roadsFolder, "Alley_MidE", midAlleyE, ALLEY_WIDTH, floorY)
+	stampAlleyPolyline(roadsFolder, "Alley_West", westAlley, ALLEY_WIDTH, floorY)
+	stampAlleyPolyline(roadsFolder, "Alley_East", eastAlley, ALLEY_WIDTH, floorY)
+	stampAlleyPolyline(roadsFolder, "Alley_MidW", midAlleyW, ALLEY_WIDTH, floorY)
+	stampAlleyPolyline(roadsFolder, "Alley_MidE", midAlleyE, ALLEY_WIDTH, floorY)
 
 	-- Intersection pads at every grid crossing (reads as street junctions from above).
 	local junctionIdx = 0
@@ -880,15 +986,16 @@ local function buildUrbanMassing(parent: Folder)
 			part(
 				roadsFolder,
 				"Junction_" .. junctionIdx,
-				Vector3.new(ROAD_WIDTH + 4, 0.35, ROAD_WIDTH + 4),
-				CFrame.new(x, floorY + 0.2, z),
+				Vector3.new(ROAD_WIDTH + 2, 0.3, ROAD_WIDTH + 2),
+				CFrame.new(x, floorY + 0.16, z),
 				COLOR.asphalt,
 				Enum.Material.Asphalt
 			)
 		end
 	end
 
-	-- Reserved sites: safe-house yards + discrete ladder-snipe footprints.
+	-- Reserved sites: safe-house yards + discrete ladder-snipe footprints
+	-- + the single Market LOS blocker island (see stamp below).
 	-- Spawns (Motorcade / Market) are ON the grid roads — no clearPad plaza needed.
 	local clearPads = {
 		{ x = -385, z = 0, hw = 44, hd = 38 }, -- Consulate yard (feeds from X=-400 / Z=0 roads)
@@ -902,6 +1009,8 @@ local function buildUrbanMassing(parent: Folder)
 		{ x = -96, z = -20, hw = 14, hd = 14 },
 		{ x = 96, z = -20, hw = 14, hd = 14 },
 		{ x = -48, z = -220, hw = 14, hd = 14 },
+		-- One intentional LOS island south of Market on the mid avenue.
+		{ x = 0, z = -145, hw = 26, hd = 20 },
 	}
 
 	local function onOrthoRoad(px: number, pz: number): boolean
@@ -996,6 +1105,28 @@ local function buildUrbanMassing(parent: Folder)
 				end
 			end
 		end
+	end
+
+	----------------------------------------------------------------
+	-- Exactly ONE building in front of Market (terror) spawn that
+	-- breaks direct LOS down the mid avenue to Motorcade (good).
+	-- Spawn stays on the road at (0, -50); this island sits south
+	-- of it on X=0 so the round-start stare is blocked. Players
+	-- flank via adjacent N–S streets — not a wall of buildings.
+	----------------------------------------------------------------
+	do
+		local losH = 72
+		local losW = 48 -- wider than ROAD_WIDTH so spawn jitter (±14 X) cannot peek past
+		local losD = 36
+		local losZ = -145 -- between Market (-50) and Motorcade (-500)
+		part(
+			blocksFolder,
+			"TerrorSpawnLOSBlocker",
+			Vector3.new(losW, losH, losD),
+			CFrame.new(0, floorY + losH / 2, losZ),
+			COLOR.concrete,
+			Enum.Material.Concrete
+		)
 	end
 
 	----------------------------------------------------------------
