@@ -13,12 +13,13 @@
 	  Terror spawn → each house ~500
 	  Dual-contest midfield around Market
 
-	Layout philosophy: Matthew’s dense city references — small flush parcels with
-	tall towers (street canyons), continuous asphalt road ribbons between plots,
-	tall city perimeter walls sealing the arena, and discrete TrussPart ladder
-	snipes on selected roofs only (no rooftop highway). Ribbons mark Motorcade →
-	mid → each house plus A↔B arterial; MapService fills every other plot with
-	≥52-stud massing so you cannot peek across low roofs.
+	Layout philosophy: real city grid hierarchy — orthogonal ROAD GRID first
+	(readable asphalt corridors), dense tall buildings on BLOCKS between roads,
+	narrow ALLEYS as secondary costly cuts, spawns on road centerlines. Tall city
+	perimeter walls seal the arena; discrete TrussPart ladder snipes on selected
+	roofs only (no rooftop highway). Path ribbons mark Motorcade → mid → each
+	house plus A↔B arterial (contest timing); MapService keeps those arterials
+	walkable on top of the grid.
 
 	Rebuild the map when CaptureDuration or SprintSpeed change — those
 	define R and invalidate this blockout (see GameConfig / design §7.2).

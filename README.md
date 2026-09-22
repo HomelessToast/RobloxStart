@@ -59,23 +59,22 @@ Consulate / Precinct.
 
 ### Layout philosophy (city-first greybox)
 
-Metric distances above are unchanged. Massing follows Matthew’s city references
-and the latest city-first pass (perimeter → roads → discrete snipes):
+Metric distances above are unchanged. Massing follows a **real city grid** hierarchy
+(roads → blocks → alleys), then perimeter + discrete snipes:
 
-- **Perimeter walls** — ~148-stud city facade / skyline walls fully seal the arena
-  (`VIPMap.Perimeter`) so you cannot see or walk beyond the playable city
-- **Right-side parcel grid** — small ~32-stud plots, frequent corners, tight streets
-  (reject left-side huge empty plots / open fields)
-- **Every non-street parcel = tall tower** (≈52–100 studs) — street canyons that block
-  corner peeks and long roof sightlines; no flat grey pads
-- Buildings are **flush** (pitch = footprint) so you cannot slip between blocks
-- **Road network** — continuous asphalt ribbons + curbs + center marks along tactical
-  corridors (`VIPMap.UrbanMassing.RoadNetwork`); streets are driveable/walkable, not
-  leftover gaps in a solid building mass
-- Only named tactical corridors + costly alley bypasses are walkable (CS/Valorant lanes)
-- Market mid is a pinched crossing
-- **Discrete ladder snipes** — TrussPart climbs on selected towers only (`VIPMap.Vantages`);
-  isolated rooftop decks, no continuous rooftop rotate (§7.5)
+1. **Road grid first** — orthogonal N–S / E–W asphalt corridors (**32-stud** primary
+   width) on ~**100-stud** centerlines (`VIPMap.UrbanMassing.RoadNetwork`). Continuous,
+   readable from above, walkable — not leftover gaps in a tower soup.
+2. **Blocks between roads** — tall towers (≈52–100 studs) fill parcels **inset** from
+   road edges (~68-stud building footprints). Dense enough to block open-field peeks;
+   buildings surround the streets.
+3. **Alleys** — narrower (**12-stud**) secondary cuts as costly bypasses.
+4. **Metric arterials** — 28-stud boulevards along path ribbons so contest timing stays
+   walkable; Motorcade / Market spawns sit on road centerlines (X=0 intersections).
+5. **Perimeter walls** — ~148-stud city facade / skyline walls seal the arena
+   (`VIPMap.Perimeter`).
+6. **Discrete ladder snipes** — TrussPart climbs on selected towers only
+   (`VIPMap.Vantages`); isolated rooftop decks, no continuous rooftop rotate (§7.5).
 
 Art is still colored Parts only — modular dress is deferred until these metrics
 pass playtest. Economy / best-of-7 / weapons expansion stays out of this PR.
@@ -110,11 +109,11 @@ Then in Roblox Studio:
 4. Press **Play** (F5) — not just open the place. The greybox is built by the
    **server** on start (`Bootstrap` → `MapService.build`). Edit mode only has the
    baseplate + spawn pad until Play runs.
-5. You should land at the Motorcade (south) and see **tall perimeter facade walls**,
-   a continuous asphalt street network between dense towers, Consulate (blue/west)
-   and Precinct (orange/east), plus climbable **TrussPart ladders** on selected
-   sniper towers. Output must show `[MapService] Metric VIP greybox built` and
-   `[MapValidator] PASS`.
+5. You should land at the Motorcade (south) **on the street**, see a readable
+   **orthogonal asphalt grid** with dense towers on the blocks between roads,
+   tall perimeter facade walls, Consulate (blue/west) and Precinct (orange/east),
+   plus climbable **TrussPart ladders** on selected sniper towers. Output must show
+   `[MapService] Metric VIP greybox built` and `[MapValidator] PASS`.
 
 Solo Play is enough to **see** the map. A round still needs **2 players**.
 

@@ -2,22 +2,23 @@
 --[[
 	Builds the metric-correct urban greybox from MapMetrics.
 
-	City-first direction (Matthew): perimeter walls → road network → discrete
-	ladder snipes → feel of a dense city. Game mechanics (economy / bo7 /
-	weapons) stay out of this pass.
+	City-first hierarchy (Matthew):
+	  1. Lay a readable orthogonal ROAD GRID first (continuous asphalt corridors)
+	  2. Fill BLOCKS between roads with dense tall buildings
+	  3. Cut a few secondary ALLEYS as costly bypasses
+	  4. Place spawns on road centerlines / intersections
+	Then perimeter walls + discrete ladder snipes. No new game mechanics.
 
-	Layout philosophy: dense city grid + CS2/Valorant lanes — few meaningful
-	routes with chokepoints that matter; no large empty plazas. Metric ribbons
-	in MapMetrics stay the distance source of truth.
+	Metric ribbons in MapMetrics stay the distance source of truth; primary
+	arterials follow those ribbons on top of the grid so contest timing holds.
 
 	Gameplay wiring (unchanged contracts):
 	- Workspace.VIPMap / SafeHouseA|B / CaptureVolume (+ SafeHouseId attribute)
 	- MapService.getCaptureVolume / getSpawnCFrame / pointInPart
 
 	Also: MapAnchor tags, CaptureBoundary markers, costly choke bypasses,
-	tall city perimeter walls, continuous street asphalt, discrete TrussPart
-	ladder climbs onto selected roofs (no rooftop highway), overhead arcade,
-	no lethal VIP falls.
+	tall city perimeter walls, discrete TrussPart ladder climbs onto selected
+	roofs (no rooftop highway), overhead arcade, no lethal VIP falls.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
@@ -537,82 +538,30 @@ local function buildPerimeterWalls(parent: Folder)
 end
 
 --[[
-	Continuous asphalt ribbons along tactical corridors — readable street network
-	(driveable / walkable), not just building mass with leftover gaps.
+	City street hierarchy:
+	  1. Orthogonal ROAD GRID — continuous asphalt corridors (readable from above)
+	  2. BLOCKS between roads — dense tall buildings on parcels
+	  3. ALLEYS — narrow secondary cuts (costly bypasses)
+	  4. Metric arterials — wider ribbons along MapMetrics paths (contest timing)
+	Spawns sit on road centerlines / intersections, never inside building mass.
 ]]
-local function stampRoadSegment(
-	parent: Folder,
-	name: string,
-	a: Vector3,
-	b: Vector3,
-	width: number,
-	floorY: number
-)
-	local mid = (a + b) * 0.5
-	local len = MapMetrics.straightLine(a, b)
-	if len < 1 then
-		return
-	end
-	local yaw = math.atan2(a.X - b.X, a.Z - b.Z)
-	part(
-		parent,
-		name,
-		Vector3.new(width, 0.4, math.max(len, 1)),
-		CFrame.new(mid.X, floorY + 0.22, mid.Z) * CFrame.Angles(0, yaw, 0),
-		COLOR.asphalt,
-		Enum.Material.Asphalt
-	)
-	-- Center dashed line (visual only)
-	part(
-		parent,
-		name .. "_Mark",
-		Vector3.new(1.2, 0.15, math.max(len * 0.55, 1)),
-		CFrame.new(mid.X, floorY + 0.48, mid.Z) * CFrame.Angles(0, yaw, 0),
-		COLOR.marking,
-		Enum.Material.Neon,
-		false
-	)
-	-- Low curbs
-	local right = Vector3.new(math.cos(yaw), 0, -math.sin(yaw))
-	part(
-		parent,
-		name .. "_CurbL",
-		Vector3.new(1.5, 1.2, math.max(len, 1)),
-		CFrame.new(mid.X + right.X * (width * 0.5), floorY + 0.6, mid.Z + right.Z * (width * 0.5))
-			* CFrame.Angles(0, yaw, 0),
-		COLOR.curb
-	)
-	part(
-		parent,
-		name .. "_CurbR",
-		Vector3.new(1.5, 1.2, math.max(len, 1)),
-		CFrame.new(mid.X - right.X * (width * 0.5), floorY + 0.6, mid.Z - right.Z * (width * 0.5))
-			* CFrame.Angles(0, yaw, 0),
-		COLOR.curb
-	)
-end
 
-local function stampRoadPolyline(
-	parent: Folder,
-	namePrefix: string,
-	points: { Vector3 },
-	width: number,
-	floorY: number
-)
-	for i = 1, #points - 1 do
-		stampRoadSegment(parent, namePrefix .. "_" .. i, points[i], points[i + 1], width, floorY)
-	end
-end
+-- Primary street width (asphalt lane you can read from above). Was ~22; now wider.
+local ROAD_WIDTH = 32
+local ROAD_HALF = ROAD_WIDTH * 0.5
+-- Secondary alleys — narrower, costlier than primary streets.
+local ALLEY_WIDTH = 12
+local ALLEY_HALF = ALLEY_WIDTH * 0.5
+-- Metric arterial boulevards (follow path ribbons; keep contest timing walkable).
+local ARTERIAL_WIDTH = 28
+local ARTERIAL_HALF = ARTERIAL_WIDTH * 0.5
 
---[[
-	Dense city grid matching Matthew's references:
-	- Right-side parcel model: small varied plots, tight streets, frequent corners
-	- Every non-street parcel filled with TALL towers (street canyons) — no flat pads,
-	  no gaps between adjacent buildings you can slip through
-	- Sightlines die at corners; no long peeks over low roofs across the map
-	- Only carved tactical corridors + costly alleys are walkable (CS/Valorant lanes)
-	- Path ribbons in MapMetrics stay the distance source of truth
-]]
+-- N–S road centerlines (studs). Motorcade/Market sit on X=0.
+local GRID_XS = { -400, -300, -200, -100, 0, 100, 200, 300, 400 }
+-- E–W road centerlines. Includes Z=-500 (Motorcade), Z=-50 (Market), Z=0 (house street).
+-- Typical 100-stud centerlines → ~68-stud building footprints after 32-stud roads.
+-- Midfield uses 50-stud steps (-100/-50/0/50) for denser blocks around Market/houses.
+local GRID_ZS = { -500, -400, -300, -200, -100, -50, 0, 50, 150 }
 
 local function distPointToSegment2D(
 	px: number,
@@ -684,6 +633,9 @@ local function stampTallParcel(
 	footZ: number,
 	floorY: number
 )
+	if footX < 10 or footZ < 10 then
+		return
+	end
 	local h = parcelHeight(cx, cz)
 	local style = (math.abs(math.floor(cx) + math.floor(cz)) % 5)
 	local color = if style <= 1
@@ -695,10 +647,9 @@ local function stampTallParcel(
 		elseif style == 2 then Enum.Material.Metal
 		else Enum.Material.Concrete
 
-	-- Varied massing inside the parcel (right-ref small blocks) but ZERO walkable gaps:
-	-- sub-towers always abut and still fill the full footprint.
-	if style == 0 and footX >= 28 and footZ >= 28 then
-		-- Twin towers split on X, flush to parcel edges
+	-- Varied massing inside the parcel; sub-volumes stay inside parcel bounds
+	-- so they never spill onto the reserved road corridors.
+	if style == 0 and footX >= 36 and footZ >= 36 then
 		local half = footX * 0.5
 		local h2 = h - 8
 		part(
@@ -717,8 +668,7 @@ local function stampTallParcel(
 			COLOR.concrete,
 			Enum.Material.Concrete
 		)
-	elseif style == 3 and footX >= 28 and footZ >= 28 then
-		-- L-mass: full-height main + shorter wing (still fills XY)
+	elseif style == 3 and footX >= 36 and footZ >= 36 then
 		part(
 			parent,
 			namePrefix .. "_Main",
@@ -735,7 +685,6 @@ local function stampTallParcel(
 			COLOR.brick,
 			Enum.Material.Brick
 		)
-		-- Fill remaining corner so you cannot walk through the L gap
 		part(
 			parent,
 			namePrefix .. "_Fill",
@@ -744,7 +693,6 @@ local function stampTallParcel(
 			COLOR.wall
 		)
 	else
-		-- Solid tower filling the whole parcel
 		part(
 			parent,
 			namePrefix,
@@ -754,6 +702,93 @@ local function stampTallParcel(
 			mat
 		)
 	end
+end
+
+local function stampRoadSegment(
+	parent: Folder,
+	name: string,
+	a: Vector3,
+	b: Vector3,
+	width: number,
+	floorY: number
+)
+	local mid = (a + b) * 0.5
+	local len = MapMetrics.straightLine(a, b)
+	if len < 1 then
+		return
+	end
+	local yaw = math.atan2(a.X - b.X, a.Z - b.Z)
+	part(
+		parent,
+		name,
+		Vector3.new(width, 0.4, math.max(len, 1)),
+		CFrame.new(mid.X, floorY + 0.22, mid.Z) * CFrame.Angles(0, yaw, 0),
+		COLOR.asphalt,
+		Enum.Material.Asphalt
+	)
+	part(
+		parent,
+		name .. "_Mark",
+		Vector3.new(1.2, 0.15, math.max(len * 0.55, 1)),
+		CFrame.new(mid.X, floorY + 0.48, mid.Z) * CFrame.Angles(0, yaw, 0),
+		COLOR.marking,
+		Enum.Material.Neon,
+		false
+	)
+	local right = Vector3.new(math.cos(yaw), 0, -math.sin(yaw))
+	part(
+		parent,
+		name .. "_CurbL",
+		Vector3.new(1.5, 1.2, math.max(len, 1)),
+		CFrame.new(mid.X + right.X * (width * 0.5), floorY + 0.6, mid.Z + right.Z * (width * 0.5))
+			* CFrame.Angles(0, yaw, 0),
+		COLOR.curb
+	)
+	part(
+		parent,
+		name .. "_CurbR",
+		Vector3.new(1.5, 1.2, math.max(len, 1)),
+		CFrame.new(mid.X - right.X * (width * 0.5), floorY + 0.6, mid.Z - right.Z * (width * 0.5))
+			* CFrame.Angles(0, yaw, 0),
+		COLOR.curb
+	)
+end
+
+local function stampRoadPolyline(
+	parent: Folder,
+	namePrefix: string,
+	points: { Vector3 },
+	width: number,
+	floorY: number
+)
+	for i = 1, #points - 1 do
+		stampRoadSegment(parent, namePrefix .. "_" .. i, points[i], points[i + 1], width, floorY)
+	end
+end
+
+-- Axis-aligned full-span grid roads (the readable city lattice).
+local function stampOrthoRoadNS(
+	parent: Folder,
+	name: string,
+	x: number,
+	z0: number,
+	z1: number,
+	width: number,
+	floorY: number
+)
+	stampRoadSegment(parent, name, Vector3.new(x, 0, z0), Vector3.new(x, 0, z1), width, floorY)
+end
+
+local function stampOrthoRoadEW(
+	parent: Folder,
+	name: string,
+	z: number,
+	x0: number,
+	x1: number,
+	width: number,
+	floorY: number
+)
+	stampRoadSegment(parent, name, Vector3.new(x0, 0, z), Vector3.new(x1, 0, z), width, floorY)
 end
 
 local function buildUrbanMassing(parent: Folder)
@@ -774,15 +809,6 @@ local function buildUrbanMassing(parent: Folder)
 	roadsFolder.Name = "RoadNetwork"
 	roadsFolder.Parent = massing
 
-	-- Tight street half-widths (right-ref road network feel; smokeable pinches).
-	local laneHalf = {
-		primary = 11, -- ~22 stud center avenue
-		approach = 10,
-		arterial = 12, -- southern A↔B boulevard
-		alley = 6, -- costly bypass (~12 studs)
-		crossover = 8,
-	}
-
 	local paths = MapMetrics.Paths
 	local goodToA = paths.Good_to_A.points
 	local goodToB = paths.Good_to_B.points
@@ -791,144 +817,190 @@ local function buildUrbanMassing(parent: Folder)
 	local aToB = paths.A_to_B.points
 	local midLane = paths.Good_to_Terror.points
 
-	-- Costly alley bypasses + limited crossovers (not free highways).
-	local westBypass = {
-		Vector3.new(-220, 0, -480),
-		Vector3.new(-220, 0, -300),
-		Vector3.new(-220, 0, -160),
-		Vector3.new(-300, 0, -80),
-		Vector3.new(-340, 0, -20),
+	-- Secondary alleys (narrower than primary grid roads) — intentional costly cuts.
+	local westAlley = {
+		Vector3.new(-250, 0, -450),
+		Vector3.new(-250, 0, -350),
+		Vector3.new(-250, 0, -250),
+		Vector3.new(-250, 0, -150),
+		Vector3.new(-250, 0, -50),
 	}
-	local eastBypass = {
-		Vector3.new(220, 0, -480),
-		Vector3.new(220, 0, -300),
-		Vector3.new(220, 0, -160),
-		Vector3.new(300, 0, -80),
-		Vector3.new(340, 0, -20),
+	local eastAlley = {
+		Vector3.new(250, 0, -450),
+		Vector3.new(250, 0, -350),
+		Vector3.new(250, 0, -250),
+		Vector3.new(250, 0, -150),
+		Vector3.new(250, 0, -50),
 	}
-	local earlyCrossover = {
-		Vector3.new(-100, 0, -380),
-		Vector3.new(0, 0, -380),
-		Vector3.new(100, 0, -380),
+	local midAlleyW = {
+		Vector3.new(-150, 0, -250),
+		Vector3.new(-150, 0, -150),
+		Vector3.new(-150, 0, -50),
 	}
-	local lateCrossover = {
-		Vector3.new(-140, 0, -160),
-		Vector3.new(0, 0, -160),
-		Vector3.new(140, 0, -160),
-	}
-	local northLink = {
-		Vector3.new(-180, 0, 100),
-		Vector3.new(0, 0, 100),
-		Vector3.new(180, 0, 100),
+	local midAlleyE = {
+		Vector3.new(150, 0, -250),
+		Vector3.new(150, 0, -150),
+		Vector3.new(150, 0, -50),
 	}
 
-	-- Continuous asphalt street ribbons (driveable/walkable network read).
-	stampRoadPolyline(roadsFolder, "Ave_MotorcadeMarket", midLane, laneHalf.primary * 2, floorY)
-	stampRoadPolyline(roadsFolder, "Approach_GoodA", goodToA, laneHalf.approach * 2, floorY)
-	stampRoadPolyline(roadsFolder, "Approach_GoodB", goodToB, laneHalf.approach * 2, floorY)
-	stampRoadPolyline(roadsFolder, "Blvd_AtoB", aToB, laneHalf.arterial * 2, floorY)
-	stampRoadPolyline(roadsFolder, "Approach_TerrorA", terrorToA, laneHalf.approach * 2, floorY)
-	stampRoadPolyline(roadsFolder, "Approach_TerrorB", terrorToB, laneHalf.approach * 2, floorY)
-	stampRoadPolyline(roadsFolder, "Alley_West", westBypass, laneHalf.alley * 2, floorY)
-	stampRoadPolyline(roadsFolder, "Alley_East", eastBypass, laneHalf.alley * 2, floorY)
-	stampRoadPolyline(roadsFolder, "Xover_Early", earlyCrossover, laneHalf.crossover * 2, floorY)
-	stampRoadPolyline(roadsFolder, "Xover_Late", lateCrossover, laneHalf.crossover * 2, floorY)
-	stampRoadPolyline(roadsFolder, "Xover_North", northLink, laneHalf.crossover * 2, floorY)
+	----------------------------------------------------------------
+	-- 1. ROAD GRID FIRST — continuous orthogonal asphalt corridors
+	----------------------------------------------------------------
+	local zMin = GRID_ZS[1]
+	local zMax = GRID_ZS[#GRID_ZS]
+	local xMin = GRID_XS[1]
+	local xMax = GRID_XS[#GRID_XS]
 
-	-- Spawn / objective yards only — NOT large empty plazas.
-	-- Includes discrete sniper-tower footprints so massing leaves them open.
+	for _, x in GRID_XS do
+		stampOrthoRoadNS(roadsFolder, "GridNS_" .. math.floor(x), x, zMin, zMax, ROAD_WIDTH, floorY)
+	end
+	for _, z in GRID_ZS do
+		stampOrthoRoadEW(roadsFolder, "GridEW_" .. math.floor(z), z, xMin, xMax, ROAD_WIDTH, floorY)
+	end
+
+	----------------------------------------------------------------
+	-- Metric arterials (contest-timing boulevards) + alleys
+	----------------------------------------------------------------
+	stampRoadPolyline(roadsFolder, "Ave_MotorcadeMarket", midLane, ARTERIAL_WIDTH, floorY)
+	stampRoadPolyline(roadsFolder, "Approach_GoodA", goodToA, ARTERIAL_WIDTH, floorY)
+	stampRoadPolyline(roadsFolder, "Approach_GoodB", goodToB, ARTERIAL_WIDTH, floorY)
+	stampRoadPolyline(roadsFolder, "Blvd_AtoB", aToB, ARTERIAL_WIDTH, floorY)
+	stampRoadPolyline(roadsFolder, "Approach_TerrorA", terrorToA, ARTERIAL_WIDTH, floorY)
+	stampRoadPolyline(roadsFolder, "Approach_TerrorB", terrorToB, ARTERIAL_WIDTH, floorY)
+	stampRoadPolyline(roadsFolder, "Alley_West", westAlley, ALLEY_WIDTH, floorY)
+	stampRoadPolyline(roadsFolder, "Alley_East", eastAlley, ALLEY_WIDTH, floorY)
+	stampRoadPolyline(roadsFolder, "Alley_MidW", midAlleyW, ALLEY_WIDTH, floorY)
+	stampRoadPolyline(roadsFolder, "Alley_MidE", midAlleyE, ALLEY_WIDTH, floorY)
+
+	-- Intersection pads at every grid crossing (reads as street junctions from above).
+	local junctionIdx = 0
+	for _, x in GRID_XS do
+		for _, z in GRID_ZS do
+			junctionIdx += 1
+			part(
+				roadsFolder,
+				"Junction_" .. junctionIdx,
+				Vector3.new(ROAD_WIDTH + 4, 0.35, ROAD_WIDTH + 4),
+				CFrame.new(x, floorY + 0.2, z),
+				COLOR.asphalt,
+				Enum.Material.Asphalt
+			)
+		end
+	end
+
+	-- Reserved sites: safe-house yards + discrete ladder-snipe footprints.
+	-- Spawns (Motorcade / Market) are ON the grid roads — no clearPad plaza needed.
 	local clearPads = {
-		{ x = 0, z = -500, hw = 22, hd = 22 }, -- Motorcade
-		{ x = 0, z = -50, hw = 24, hd = 24 }, -- Market
-		{ x = -385, z = 0, hw = 44, hd = 38 }, -- Consulate yard
+		{ x = -385, z = 0, hw = 44, hd = 38 }, -- Consulate yard (feeds from X=-400 / Z=0 roads)
 		{ x = 385, z = 0, hw = 44, hd = 38 }, -- Precinct yard
-		{ x = -150, z = -260, hw = 22, hd = 20 }, -- approach vantages
-		{ x = 150, z = -260, hw = 22, hd = 20 },
-		{ x = -280, z = -120, hw = 20, hd = 22 },
-		{ x = 280, z = -120, hw = 20, hd = 22 },
-		{ x = -64, z = -320, hw = 16, hd = 16 }, -- discrete ladder snipes
-		{ x = 64, z = -320, hw = 16, hd = 16 },
-		{ x = -96, z = -20, hw = 16, hd = 16 },
-		{ x = 96, z = -20, hw = 16, hd = 16 },
-		{ x = -48, z = -220, hw = 16, hd = 16 }, -- off mid avenue
+		{ x = -150, z = -260, hw = 18, hd = 16 }, -- approach vantages
+		{ x = 150, z = -260, hw = 18, hd = 16 },
+		{ x = -280, z = -120, hw = 16, hd = 18 },
+		{ x = 280, z = -120, hw = 16, hd = 18 },
+		{ x = -64, z = -320, hw = 14, hd = 14 }, -- discrete ladder snipes
+		{ x = 64, z = -320, hw = 14, hd = 14 },
+		{ x = -96, z = -20, hw = 14, hd = 14 },
+		{ x = 96, z = -20, hw = 14, hd = 14 },
+		{ x = -48, z = -220, hw = 14, hd = 14 },
 	}
 
-	local function isPlayableCorridor(px: number, pz: number): boolean
+	local function onOrthoRoad(px: number, pz: number): boolean
+		for _, x in GRID_XS do
+			if math.abs(px - x) <= ROAD_HALF then
+				return true
+			end
+		end
+		for _, z in GRID_ZS do
+			if math.abs(pz - z) <= ROAD_HALF then
+				return true
+			end
+		end
+		return false
+	end
+
+	local function onAlley(px: number, pz: number): boolean
+		return nearPolyline(px, pz, westAlley, ALLEY_HALF)
+			or nearPolyline(px, pz, eastAlley, ALLEY_HALF)
+			or nearPolyline(px, pz, midAlleyW, ALLEY_HALF)
+			or nearPolyline(px, pz, midAlleyE, ALLEY_HALF)
+	end
+
+	local function onArterial(px: number, pz: number): boolean
+		return nearPolyline(px, pz, midLane, ARTERIAL_HALF)
+			or nearPolyline(px, pz, goodToA, ARTERIAL_HALF)
+			or nearPolyline(px, pz, goodToB, ARTERIAL_HALF)
+			or nearPolyline(px, pz, aToB, ARTERIAL_HALF)
+			or nearPolyline(px, pz, terrorToA, ARTERIAL_HALF)
+			or nearPolyline(px, pz, terrorToB, ARTERIAL_HALF)
+	end
+
+	local function isReserved(px: number, pz: number): boolean
 		for _, pad in clearPads do
 			if inRect(px, pz, pad.x, pad.z, pad.hw, pad.hd) then
 				return true
 			end
 		end
-		if nearPolyline(px, pz, midLane, laneHalf.primary) then
-			return true
-		end
-		if nearPolyline(px, pz, goodToA, laneHalf.approach) then
-			return true
-		end
-		if nearPolyline(px, pz, goodToB, laneHalf.approach) then
-			return true
-		end
-		if nearPolyline(px, pz, aToB, laneHalf.arterial) then
-			return true
-		end
-		if nearPolyline(px, pz, terrorToA, laneHalf.approach) then
-			return true
-		end
-		if nearPolyline(px, pz, terrorToB, laneHalf.approach) then
-			return true
-		end
-		if nearPolyline(px, pz, westBypass, laneHalf.alley) then
-			return true
-		end
-		if nearPolyline(px, pz, eastBypass, laneHalf.alley) then
-			return true
-		end
-		if nearPolyline(px, pz, earlyCrossover, laneHalf.crossover) then
-			return true
-		end
-		if nearPolyline(px, pz, lateCrossover, laneHalf.crossover) then
-			return true
-		end
-		if nearPolyline(px, pz, northLink, laneHalf.crossover) then
-			return true
-		end
-		return false
+		return onOrthoRoad(px, pz) or onAlley(px, pz) or onArterial(px, pz)
 	end
 
-	-- Right-ref parcel grid: small cells, buildings flush (no interstitial alleys).
-	-- pitch == footprint so adjacent towers share edges; only corridor cells stay open.
-	local pitch = 32
+	----------------------------------------------------------------
+	-- 2. FILL BLOCKS between roads — buildings sit on parcels, not roads
+	----------------------------------------------------------------
 	local idx = 0
-	local streetIdx = 0
-	for x = -416, 416, pitch do
-		for z = -512, 160, pitch do
-			local cx = x + pitch * 0.5
-			local cz = z + pitch * 0.5
-			if isPlayableCorridor(cx, cz) then
-				streetIdx += 1
-				-- Intersection / lane fill pads (road ribbons carry the main asphalt)
-				part(
-					lanesFolder,
-					"StreetPad_" .. streetIdx,
-					Vector3.new(pitch - 4, 0.3, pitch - 4),
-					CFrame.new(cx, floorY + 0.18, cz),
-					COLOR.asphalt,
-					Enum.Material.Asphalt,
-					false
-				)
-			else
-				idx += 1
-				stampTallParcel(blocksFolder, "Tower_" .. idx, cx, cz, pitch, pitch, floorY)
+	for i = 1, #GRID_XS - 1 do
+		for j = 1, #GRID_ZS - 1 do
+			local x0 = GRID_XS[i]
+			local x1 = GRID_XS[i + 1]
+			local z0 = GRID_ZS[j]
+			local z1 = GRID_ZS[j + 1]
+			-- Parcel inset from road edges so asphalt corridors stay continuous.
+			local left = x0 + ROAD_HALF + 1
+			local right = x1 - ROAD_HALF - 1
+			local south = z0 + ROAD_HALF + 1
+			local north = z1 - ROAD_HALF - 1
+			local footX = right - left
+			local footZ = north - south
+			if footX >= 12 and footZ >= 12 then
+				local cx = (left + right) * 0.5
+				local cz = (south + north) * 0.5
+
+				-- Skip parcels eaten by house yards / sniper pads / arterials.
+				-- If arterial/alley cuts the block, fill leftover lobes when large.
+				if isReserved(cx, cz) then
+					local subW = footX * 0.48
+					local subD = footZ * 0.48
+					local offsets = {
+						{ cx - footX * 0.25, cz - footZ * 0.25 },
+						{ cx + footX * 0.25, cz - footZ * 0.25 },
+						{ cx - footX * 0.25, cz + footZ * 0.25 },
+						{ cx + footX * 0.25, cz + footZ * 0.25 },
+					}
+					for _, off in offsets do
+						local sx, sz = off[1], off[2]
+						if not isReserved(sx, sz) and subW >= 14 and subD >= 14 then
+							idx += 1
+							stampTallParcel(
+								blocksFolder,
+								"Block_" .. idx,
+								sx,
+								sz,
+								subW,
+								subD,
+								floorY
+							)
+						end
+					end
+				else
+					idx += 1
+					stampTallParcel(blocksFolder, "Block_" .. idx, cx, cz, footX, footZ, floorY)
+				end
 			end
 		end
 	end
 
-	-- Mid pinch towers: Market is a crossing, not an open field (leave avenue open).
-	stampTallParcel(blocksFolder, "MarketPinchN", 0, 36, 64, 28, floorY)
-	stampTallParcel(blocksFolder, "MarketPinchSW", -40, -108, 28, 36, floorY)
-	stampTallParcel(blocksFolder, "MarketPinchSE", 40, -108, 28, 36, floorY)
-
-	-- Center canal choke (~22 stud opening) on Motorcade→Market lane
+	----------------------------------------------------------------
+	-- Chokes / arcade / street cover on primary avenues (not open fields)
+	----------------------------------------------------------------
 	part(
 		lanesFolder,
 		"CanalBridgeChokeL",
@@ -952,77 +1024,50 @@ local function buildUrbanMassing(parent: Folder)
 		Enum.Material.Asphalt
 	)
 
-	-- West approach choke + longer/narrower western alley bypass
 	part(
 		lanesFolder,
 		"WestLaneChokeL",
-		Vector3.new(26, 30, 20),
-		CFrame.new(-210, floorY + 15, -265),
+		Vector3.new(22, 30, 18),
+		CFrame.new(-130, floorY + 15, -300),
 		COLOR.choke
 	)
 	part(
 		lanesFolder,
 		"WestLaneChokeR",
-		Vector3.new(26, 30, 20),
-		CFrame.new(-160, floorY + 15, -265),
+		Vector3.new(22, 30, 18),
+		CFrame.new(-70, floorY + 15, -300),
 		COLOR.choke
 	)
 	part(
 		lanesFolder,
-		"WestBypassGapMarker",
-		Vector3.new(10, 0.3, 64),
-		CFrame.new(-220, floorY + 0.2, -265),
-		COLOR.path,
-		Enum.Material.Neon,
-		false
-	)
-
-	-- East approach choke + costly eastern alley bypass
-	part(
-		lanesFolder,
 		"EastLaneChokeL",
-		Vector3.new(26, 30, 20),
-		CFrame.new(160, floorY + 15, -265),
+		Vector3.new(22, 30, 18),
+		CFrame.new(70, floorY + 15, -300),
 		COLOR.choke
 	)
 	part(
 		lanesFolder,
 		"EastLaneChokeR",
-		Vector3.new(26, 30, 20),
-		CFrame.new(210, floorY + 15, -265),
+		Vector3.new(22, 30, 18),
+		CFrame.new(130, floorY + 15, -300),
 		COLOR.choke
 	)
-	part(
-		lanesFolder,
-		"EastBypassGapMarker",
-		Vector3.new(10, 0.3, 64),
-		CFrame.new(220, floorY + 0.2, -265),
-		COLOR.path,
-		Enum.Material.Neon,
-		false
-	)
 
-	-- Southern arterial pinches (A↔B) — tall so they also cut roof peeks
 	part(
 		lanesFolder,
 		"SouthBlvdChokeW",
-		Vector3.new(32, 36, 22),
-		CFrame.new(-200, floorY + 18, -250),
+		Vector3.new(28, 36, 20),
+		CFrame.new(-200, floorY + 18, -280),
 		COLOR.choke
 	)
 	part(
 		lanesFolder,
 		"SouthBlvdChokeE",
-		Vector3.new(32, 36, 22),
-		CFrame.new(200, floorY + 18, -250),
+		Vector3.new(28, 36, 20),
+		CFrame.new(200, floorY + 18, -280),
 		COLOR.choke
 	)
 
-	-- Decision masses (~200–250 from each house): tall blocks, not low wood pads
-	stampTallParcel(blocksFolder, "DecisionA", -210, -50, 30, 30, floorY)
-	stampTallParcel(blocksFolder, "DecisionB", 210, -50, 30, 30, floorY)
-
-	-- Overhead arcade on primary center route (§7.5)
 	for i = -3, 3 do
 		part(
 			lanesFolder,
@@ -1041,11 +1086,10 @@ local function buildUrbanMassing(parent: Folder)
 		Enum.Material.Metal
 	)
 
-	-- Street cover on lanes (≤60 stud open gaps); sitting in the canyon, not on roofs
 	for i = 1, 8 do
 		local z = -480 + i * 50
-		streetCover(lanesFolder, -14, z, "MidCoverL" .. i)
-		streetCover(lanesFolder, 14, z, "MidCoverR" .. i)
+		streetCover(lanesFolder, -12, z, "MidCoverL" .. i)
+		streetCover(lanesFolder, 12, z, "MidCoverR" .. i)
 	end
 	for i = 1, 5 do
 		local t = i / 6
@@ -1053,8 +1097,8 @@ local function buildUrbanMassing(parent: Folder)
 		local az = goodToA[1].Z + (goodToA[#goodToA].Z - goodToA[1].Z) * t
 		local bx = goodToB[1].X + (goodToB[#goodToB].X - goodToB[1].X) * t
 		local bz = goodToB[1].Z + (goodToB[#goodToB].Z - goodToB[1].Z) * t
-		streetCover(lanesFolder, ax + 12, az, "WestLaneCover" .. i, 0.4)
-		streetCover(lanesFolder, bx - 12, bz, "EastLaneCover" .. i, -0.4)
+		streetCover(lanesFolder, ax + 10, az, "WestLaneCover" .. i, 0.4)
+		streetCover(lanesFolder, bx - 10, bz, "EastLaneCover" .. i, -0.4)
 	end
 end
 
@@ -1235,12 +1279,15 @@ function MapService.getCaptureVolume(safeHouseId: string): BasePart?
 end
 
 function MapService.getSpawnCFrame(side: string): CFrame
+	-- Spawns sit on road centerlines (Motorcade = X=0/Z=-500, Market = X=0/Z=-50).
+	-- Keep the random jitter inside the primary asphalt width so players never
+	-- land inside a building mass or on a rooftop.
 	local anchor = if side == Enums.Side.Good
 		then MapMetrics.Anchors.Motorcade.position
 		else MapMetrics.Anchors.Market.position
-	local xSpread = if side == Enums.Side.Good then 20 else 24
+	local halfLane = 14 -- inside ROAD_WIDTH 32
 	return CFrame.new(
-		anchor.X + (math.random() - 0.5) * xSpread,
+		anchor.X + (math.random() - 0.5) * halfLane * 2,
 		MapMetrics.FloorY + 4,
 		anchor.Z + (math.random() - 0.5) * 8
 	)
