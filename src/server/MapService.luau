@@ -633,11 +633,16 @@ function MapService.build()
 		baseplate.Material = Enum.Material.Asphalt
 	end
 
+	-- Keep a live SpawnLocation on the Motorcade pad so solo Play / lobby
+	-- drops the camera onto the greybox (round start still teleports via SpawnService).
 	local defaultSpawn = Workspace:FindFirstChild("SpawnLocation")
 	if defaultSpawn and defaultSpawn:IsA("SpawnLocation") then
-		defaultSpawn.Enabled = false
-		defaultSpawn.Transparency = 1
 		local motorcade = MapMetrics.Anchors.Motorcade.position
+		defaultSpawn.Enabled = true
+		defaultSpawn.Transparency = 1
+		defaultSpawn.CanCollide = false
+		defaultSpawn.Neutral = true
+		defaultSpawn.Duration = 0
 		defaultSpawn.Position = Vector3.new(motorcade.X, MapMetrics.FloorY + 0.5, motorcade.Z)
 	end
 

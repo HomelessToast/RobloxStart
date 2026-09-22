@@ -255,9 +255,12 @@ function RoundService.onPlayerRemoving(player: Player)
 end
 
 function RoundService.init()
-	MapService.build()
-	local MapValidator = require(script.Parent.MapValidator)
-	MapValidator.runAndPrint()
+	-- Greybox + MapValidator run in Bootstrap.server before this init so the
+	-- map is visible even if remotes / round wiring fail later.
+	assert(
+		MapService.getFolder(),
+		"[RoundService] VIPMap missing — Bootstrap must build the map first"
+	)
 	CaptureService.setRoundRemainingGetter(function()
 		return timeRemaining
 	end)

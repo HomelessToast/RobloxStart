@@ -54,8 +54,11 @@
         "$properties": {
           "Anchored": true,
           "Locked": true,
-          "Enabled": false,
+          "Enabled": true,
           "Transparency": 1,
+          "CanCollide": false,
+          "Neutral": true,
+          "Duration": 0,
           "Size": [12, 1, 12],
           "Position": [0, 0.5, -500],
           "TopSurface": "Smooth",

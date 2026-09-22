@@ -32,7 +32,7 @@ local function ensureRemote(name: string): RemoteEvent
 end
 
 function Remotes.init()
-	for _, name in Net do
+	for _, name in pairs(Net) do
 		ensureRemote(name)
 	end
 end

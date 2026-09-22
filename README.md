@@ -71,15 +71,32 @@ rokit install
 rojo plugin install   # Studio plugin (Windows / macOS)
 ```
 
-### 2. Sync into Studio
+### 2. Sync into Studio (required — the map is not in a published place by default)
+
+From the repo root on the machine that has Studio:
 
 ```bash
+git checkout cursor/vip-slice-0-33b0
+git pull
 rojo serve
 ```
 
-In Studio: **Plugins → Rojo → Connect** (default `localhost:34872`).
+Then in Roblox Studio:
 
-Or build a place file and open it:
+1. Open **any** empty Baseplate (or File → New).
+2. **Plugins → Rojo → Connect** → `localhost:34872` (project name **VIP**).
+3. Confirm Explorer shows `ServerScriptService.Server.Bootstrap` and a large asphalt
+   `Workspace.Baseplate` (~1000×800). If those are missing, you are not synced.
+4. Press **Play** (F5) — not just open the place. The greybox is built by the
+   **server** on start (`Bootstrap` → `MapService.build`). Edit mode only has the
+   baseplate + spawn pad until Play runs.
+5. You should land at the Motorcade (south) and see urban massing, yellow path
+   ribbons, Consulate (blue/west) and Precinct (orange/east). Output must show
+   `[MapService] Metric VIP greybox built` and `[MapValidator] PASS`.
+
+Solo Play is enough to **see** the map. A round still needs **2 players**.
+
+Or build a place file and open it (still press Play):
 
 ```bash
 mkdir -p build
@@ -88,21 +105,22 @@ rojo build default.project.json --output build/game.rbxl
 
 ### 3. Playtest checklist (Matthew)
 
-1. Start **two** Studio clients (local server + 1 player, or Team Test).
-2. Wait for the 5s lobby countdown → round goes `LIVE`.
-3. Confirm roles on the HUD (Good · President vs Terrorist).
-4. Confirm Output shows `[MapValidator] PASS` and the path report.
-5. Walk the yellow path ribbons: A↔B should feel ~45s sprint; houses are Consulate
+1. Follow §2 (serve → Connect → Play) so `Workspace.VIPMap` exists.
+2. Start **two** Studio clients (local server + 1 player, or Team Test) for a round.
+3. Wait for the 5s lobby countdown → round goes `LIVE`.
+4. Confirm roles on the HUD (Good · President vs Terrorist).
+5. Confirm Output shows `[MapValidator] PASS` and the path report.
+6. Walk the yellow path ribbons: A↔B should feel ~45s sprint; houses are Consulate
    (blue, west) and Precinct (orange, east).
-6. **Capture win:** President stands inside a green capture volume / yellow boundary
+7. **Capture win:** President stands inside a green capture volume / yellow boundary
    for 30s without leaving.
-7. **Capture break:** leave the volume mid-hold → progress resets; banner says broken.
-8. **Kill win:** Terrorist shoots the President (LMB) → Terrorists win immediately.
-9. **Wipe win:** President eliminates the only terrorist → Good wins.
-10. **Disconnect:** stop the President client mid-round → Terrorists win.
-11. **Deadline:** after the timer drops below 0:30, entering a house shows `TOO LATE`
+8. **Capture break:** leave the volume mid-hold → progress resets; banner says broken.
+9. **Kill win:** Terrorist shoots the President (LMB) → Terrorists win immediately.
+10. **Wipe win:** President eliminates the only terrorist → Good wins.
+11. **Disconnect:** stop the President client mid-round → Terrorists win.
+12. **Deadline:** after the timer drops below 0:30, entering a house shows `TOO LATE`
     and does not start capture; banner switches to `ELIMINATE`.
-12. Spot-check: no lethal falls on stair/rooftop approaches; chokes have neon bypass
+13. Spot-check: no lethal falls on stair/rooftop approaches; chokes have neon bypass
     markers; arcade near Motorcade provides overhead cover.
 
 ## Lint / build
