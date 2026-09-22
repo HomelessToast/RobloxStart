@@ -92,9 +92,29 @@ local GameConfig = {
 		},
 	},
 
-	-- Movement (map parameter)
+	-- Movement (map parameter). SprintSpeed × CaptureDuration = contest radius R.
+	-- Changing SprintSpeed invalidates MapMetrics / greybox geometry.
 	SprintSpeed = 22,
 	WalkSpeed = 16,
+
+	-- Sprint stamina — every character. Server-owned; client sends intent.
+	Sprint = {
+		MaxStamina = 100,
+		DrainPerSecond = 16, -- ~6.25s continuous sprint
+		RegenPerSecond = 14, -- ~7.1s empty → full
+		RegenDelaySeconds = 0.4, -- pause after releasing sprint before regen
+		MinStaminaToStart = 8, -- cannot start a sprint below this
+	},
+
+	-- Dodge / roll (Q) — unified for all characters (was President-only in design §5.3).
+	-- Same displacement / cooldown for everyone; see docs/vip-movement.md.
+	Dodge = {
+		Distance = 55, -- studs horizontal (covers §7.5 open-ground gaps ≤60)
+		Duration = 0.4, -- seconds of forced travel
+		RecoverySeconds = 0.3, -- cannot fire until recovery ends
+		CooldownSeconds = 30,
+		GroundRayLength = 4, -- must be near ground to roll
+	},
 
 	-- Greybox layout. Anchor world positions live in MapMetrics; path ribbons
 	-- encode §7.4 distances. Capture duration × sprint = contest radius R=660 —

@@ -72,6 +72,50 @@ local ammoLabel =
 	makeLabel("Ammo", UDim2.new(1, -20, 1, -120), UDim2.fromOffset(220, 28), 20, Vector2.new(1, 0))
 ammoLabel.TextXAlignment = Enum.TextXAlignment.Right
 
+local dodgeLabel =
+	makeLabel("Dodge", UDim2.new(1, -20, 1, -148), UDim2.fromOffset(220, 22), 14, Vector2.new(1, 0))
+dodgeLabel.TextXAlignment = Enum.TextXAlignment.Right
+dodgeLabel.Font = Enum.Font.GothamMedium
+dodgeLabel.TextColor3 = Color3.fromRGB(180, 200, 220)
+dodgeLabel.Text = "Q Dodge ready"
+
+-- Sprint stamina bar (bottom-center)
+local staminaBg = Instance.new("Frame")
+staminaBg.Name = "StaminaBarBg"
+staminaBg.AnchorPoint = Vector2.new(0.5, 1)
+staminaBg.Position = UDim2.new(0.5, 0, 1, -36)
+staminaBg.Size = UDim2.fromOffset(220, 10)
+staminaBg.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
+staminaBg.BorderSizePixel = 0
+staminaBg.Parent = screenGui
+
+local staminaBgCorner = Instance.new("UICorner")
+staminaBgCorner.CornerRadius = UDim.new(0, 4)
+staminaBgCorner.Parent = staminaBg
+
+local staminaFill = Instance.new("Frame")
+staminaFill.Name = "Fill"
+staminaFill.Size = UDim2.fromScale(1, 1)
+staminaFill.BackgroundColor3 = Color3.fromRGB(90, 200, 140)
+staminaFill.BorderSizePixel = 0
+staminaFill.Parent = staminaBg
+
+local staminaFillCorner = Instance.new("UICorner")
+staminaFillCorner.CornerRadius = UDim.new(0, 4)
+staminaFillCorner.Parent = staminaFill
+
+local staminaCaption = makeLabel(
+	"StaminaCaption",
+	UDim2.new(0.5, 0, 1, -52),
+	UDim2.fromOffset(160, 16),
+	12,
+	Vector2.new(0.5, 1)
+)
+staminaCaption.TextXAlignment = Enum.TextXAlignment.Center
+staminaCaption.Font = Enum.Font.GothamMedium
+staminaCaption.TextColor3 = Color3.fromRGB(160, 175, 190)
+staminaCaption.Text = "SPRINT  Shift"
+
 local banner = Instance.new("TextLabel")
 banner.Name = "Banner"
 banner.AnchorPoint = Vector2.new(0.5, 0)
@@ -331,6 +375,38 @@ remotes:WaitForChild(Net.PlayerState).OnClientEvent:Connect(function(payload)
 				end
 			end
 		end)
+	end
+end)
+
+remotes:WaitForChild(Net.MovementState).OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	local maxStamina = payload.maxStamina or 100
+	local stamina = payload.stamina or maxStamina
+	local ratio = if maxStamina > 0 then math.clamp(stamina / maxStamina, 0, 1) else 0
+	staminaFill.Size = UDim2.fromScale(ratio, 1)
+	if payload.sprinting then
+		staminaFill.BackgroundColor3 = Color3.fromRGB(255, 190, 80)
+		staminaCaption.Text = "SPRINTING"
+	elseif ratio < 0.25 then
+		staminaFill.BackgroundColor3 = Color3.fromRGB(220, 90, 80)
+		staminaCaption.Text = "SPRINT  Shift"
+	else
+		staminaFill.BackgroundColor3 = Color3.fromRGB(90, 200, 140)
+		staminaCaption.Text = "SPRINT  Shift"
+	end
+
+	local cd = payload.dodgeCooldownRemaining or 0
+	if payload.dodging then
+		dodgeLabel.Text = "Q Dodge…"
+		dodgeLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+	elseif cd > 0.05 then
+		dodgeLabel.Text = string.format("Q Dodge %.0fs", math.ceil(cd))
+		dodgeLabel.TextColor3 = Color3.fromRGB(150, 160, 175)
+	else
+		dodgeLabel.Text = "Q Dodge ready"
+		dodgeLabel.TextColor3 = Color3.fromRGB(180, 200, 220)
 	end
 end)
 

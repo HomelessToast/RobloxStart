@@ -99,6 +99,10 @@ function SpawnService.setFrozen(player: Player, isFrozen: boolean)
 	end
 end
 
+function SpawnService.isFrozen(player: Player): boolean
+	return frozen[player] == true
+end
+
 function SpawnService.clearFrozen(player: Player)
 	frozen[player] = nil
 end

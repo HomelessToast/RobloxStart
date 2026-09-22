@@ -11,6 +11,7 @@ local TeamService = require(script.Parent.TeamService)
 local LoadoutService = require(script.Parent.LoadoutService)
 local EconomyService = require(script.Parent.EconomyService)
 local PlayerStateService = require(script.Parent.PlayerStateService)
+local AbilityService = require(script.Parent.AbilityService)
 
 local WeaponService = {}
 
@@ -43,6 +44,10 @@ function WeaponService.canFire(player: Player): boolean
 		TeamService.getRole(player) == Enums.Role.President
 		and not WeaponDefs.isPistolTier(def.tier)
 	then
+		return false
+	end
+	-- Sprint and dodge/recovery block fire (design §5.3 / movement model).
+	if not AbilityService.canFire(player) then
 		return false
 	end
 	local now = os.clock()

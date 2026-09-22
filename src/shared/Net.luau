@@ -13,6 +13,9 @@ local Net = {
 	BuyRequest = "BuyRequest", -- Client → server: { kind: "Weapon"|"Armor", id: string }
 	BuyResult = "BuyResult", -- Server → player: { result, id?, cash?, message? }
 	EconomyState = "EconomyState", -- Server → player: { cash, lossStreak }
+	SprintIntent = "SprintIntent", -- Client → server: { sprinting: boolean }
+	DodgeRequest = "DodgeRequest", -- Client → server: {} (facing from character)
+	MovementState = "MovementState", -- Server → player: stamina + dodge cooldown mirror
 }
 
 return Net

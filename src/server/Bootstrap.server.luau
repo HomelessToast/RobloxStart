@@ -11,9 +11,11 @@ MapValidator.runAndPrint()
 LobbyService.build()
 
 local Remotes = require(script.Parent.Remotes)
+local AbilityService = require(script.Parent.AbilityService)
 local RoundService = require(script.Parent.RoundService)
 
 Remotes.init()
+AbilityService.init()
 RoundService.init()
 
 print("[VIP] Server bootstrap complete.")

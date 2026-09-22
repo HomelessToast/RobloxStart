@@ -77,4 +77,13 @@ export type PlayerStatePayload = {
 	buyOpen: boolean,
 }
 
+export type MovementStatePayload = {
+	stamina: number,
+	maxStamina: number,
+	sprinting: boolean,
+	dodgeCooldownRemaining: number,
+	dodging: boolean,
+	canFire: boolean,
+}
+
 return {}

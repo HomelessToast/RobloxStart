@@ -33,6 +33,7 @@ local ObjectiveService = require(script.Parent.ObjectiveService)
 local EconomyService = require(script.Parent.EconomyService)
 local BuyService = require(script.Parent.BuyService)
 local PlayerStateService = require(script.Parent.PlayerStateService)
+local AbilityService = require(script.Parent.AbilityService)
 
 local RoundService = {}
 
@@ -364,6 +365,7 @@ local function beginLive()
 	state = Enums.RoundState.Live
 	timeRemaining = GameConfig.RoundDurationSeconds
 	BuyService.setOpen(false)
+	AbilityService.resetAllForRound()
 	unfreezeRoster()
 	pendingMode = nil
 	lobbyCountdown = 0
@@ -407,6 +409,7 @@ local function beginBuy()
 	CaptureService.reset()
 	CombatService.setRoundLive(false)
 	BuyService.setOpen(false)
+	AbilityService.interruptAll()
 
 	local players = MatchService.getRoster()
 	if #players < GameConfig.MinPlayersToStart then
