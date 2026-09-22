@@ -2,6 +2,7 @@
 -- Server-authoritative hits. Client reports intent; server raycasts and applies damage.
 -- Friendly fire is off: same-side damage is discarded before it reaches the armor pool.
 -- No weapon pickups from corpses — LoadoutService is the only grant path.
+-- Broadcasts WeaponFired for client tracers / muzzle / sounds.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -24,7 +25,6 @@ local CombatService = {}
 local roundLive = false
 local onPlayerDied: ((Player, Player?) -> ())? = nil
 
--- Deterministic-enough spread per shot without trusting the client.
 local function rngFromShot(player: Player, origin: Vector3, direction: Vector3): () -> number
 	local seed = player.UserId
 		+ math.floor(origin.X * 10)
@@ -118,26 +118,28 @@ local function resolvePellet(
 	direction: Vector3,
 	def: any,
 	params: RaycastParams
-)
+): (Vector3, boolean)
 	local result = Workspace:Raycast(origin, direction * GameConfig.MaxShotDistance, params)
 	if not result then
-		return
+		return origin + direction * GameConfig.MaxShotDistance, false
 	end
 
+	local endPos = result.Position
 	local hitCharacter = characterFromPart(result.Instance)
 	if not hitCharacter then
-		return
+		return endPos, false
 	end
 	local victim = playerFromCharacter(hitCharacter)
 	if not victim or victim == attacker then
-		return
+		return endPos, false
 	end
 
+	local headshot = isHeadPart(result.Instance)
 	local armor = PlayerStateService.getArmor(victim)
-	local distance = (result.Position - origin).Magnitude
+	local distance = (endPos - origin).Magnitude
 	local breakdown = Ballistics.applyHit(
 		def.damage,
-		isHeadPart(result.Instance),
+		headshot,
 		def.headshotMultiplier,
 		def.armorPenetration,
 		{ pool = armor.pool, hasHelmet = armor.hasHelmet },
@@ -146,6 +148,7 @@ local function resolvePellet(
 	)
 
 	CombatService.applyDamage(attacker, victim, breakdown.healthDamage, breakdown.armorDamage)
+	return endPos, headshot
 end
 
 function CombatService.handleFireShot(player: Player, payload: any)
@@ -178,7 +181,6 @@ function CombatService.handleFireShot(player: Player, payload: any)
 	end
 	direction = direction.Unit
 
-	-- Origin must be near the shooter's head/root (anti-teleport shot).
 	if (origin - root.Position).Magnitude > GameConfig.HitValidationSlopStuds + 4 then
 		origin = root.Position + Vector3.new(0, 1.5, 0)
 	end
@@ -195,10 +197,26 @@ function CombatService.handleFireShot(player: Player, payload: any)
 
 	local rng = rngFromShot(player, origin, direction)
 	local pellets = math.max(1, def.pellets)
-	for _ = 1, pellets do
+	local primaryEnd = origin + direction * GameConfig.MaxShotDistance
+	local anyHeadshot = false
+	for i = 1, pellets do
 		local dir = Ballistics.spreadDirection(direction, def.baseSpread, rng)
-		resolvePellet(player, origin, dir, def, params)
+		local endPos, headshot = resolvePellet(player, origin, dir, def, params)
+		if i == 1 then
+			primaryEnd = endPos
+		end
+		if headshot then
+			anyHeadshot = true
+		end
 	end
+
+	Remotes.get(Net.WeaponFired):FireAllClients({
+		shooterUserId = player.UserId,
+		weaponId = def.id,
+		origin = origin,
+		endPos = primaryEnd,
+		headshot = anyHeadshot,
+	})
 end
 
 function CombatService.init()

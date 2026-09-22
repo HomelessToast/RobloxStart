@@ -21,7 +21,7 @@ Market / Consulate / Precinct):
 | Best of 7 (first to 4), sides alternate every round, HUD score + swap announce | Yes |
 | President: solo Good → that player; else rotate by UserId within the Good team | Yes |
 | Friendly fire off; server-authoritative hits; no weapon pickups | Yes |
-| BUY phase (20s) + buy menu; US/RU arsenals; armor damage pool; cash economy | Yes |
+| BUY phase (30s) + picture buy menu; US/RU arsenals; armor; tracers; health bars; 2× headshots | Yes |
 | HUD: round timer, score, cash, armor, objective banner, capture bar | Yes |
 | Metric greybox from `MapMetrics` + `MapService` (git-tracked Parts builder) | Yes |
 | Roll ability, utility nades | Deferred |
@@ -52,9 +52,9 @@ Day/Night pads, buy economy, or production round flow when unused.
 ├── default.project.json
 ├── rokit.toml
 ├── src/
-│   ├── client/     # HudController, InputController, BuyMenuController
+│   ├── client/     # Hud, Input, BuyMenu, WeaponFx, HealthBar
 │   ├── server/     # Round / Match / Lobby / Buy / Economy / Combat / Weapon / Map …
-│   └── shared/     # GameConfig, WeaponDefs, Ballistics, MapMetrics, Enums, Net
+│   └── shared/     # GameConfig, WeaponDefs, WeaponVisuals, WeaponAudio, Ballistics …
 └── .github/workflows/ci.yml
 ```
 

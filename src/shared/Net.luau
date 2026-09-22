@@ -9,6 +9,7 @@ local Net = {
 	MatchEnded = "MatchEnded", -- Server → all: { winnerTeam, scoreLine, winsA, winsB }
 	HudBanner = "HudBanner", -- Server → all: { text, kind }
 	FireShot = "FireShot", -- Client → server: { origin, direction }
+	WeaponFired = "WeaponFired", -- Server → all: { shooter, weaponId, origin, endPos, headshot? }
 	PlayerState = "PlayerState", -- Server → player: loadout / cash / armor mirror
 	BuyRequest = "BuyRequest", -- Client → server: { kind: "Weapon"|"Armor", id: string }
 	BuyResult = "BuyResult", -- Server → player: { result, id?, cash?, message? }

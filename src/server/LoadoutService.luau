@@ -1,12 +1,13 @@
 --!strict
 -- Fresh per-round loadouts. No pickups, no carry — only this service grants weapons.
--- Greybox tools: a simple Part welded to the right hand as a visual stand-in.
+-- Visuals: procedural multi-part guns from WeaponVisuals (not Billboard-labeled sticks).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Enums = require(ReplicatedStorage.Shared.Enums)
 local WeaponDefs = require(ReplicatedStorage.Shared.WeaponDefs)
+local WeaponVisuals = require(ReplicatedStorage.Shared.WeaponVisuals)
 local TeamService = require(script.Parent.TeamService)
 
 export type Loadout = {
@@ -20,58 +21,12 @@ export type Loadout = {
 local LoadoutService = {}
 
 local loadouts: { [Player]: Loadout } = {}
-local toolFolderName = "VipWeaponVisual"
-
-local function clearVisual(character: Model)
-	local existing = character:FindFirstChild(toolFolderName)
-	if existing then
-		existing:Destroy()
-	end
-end
-
-local function attachVisual(player: Player, def: WeaponDefs.WeaponDef)
-	local character = player.Character
-	if not character then
-		return
-	end
-	clearVisual(character)
-
-	local rightHand = character:FindFirstChild("RightHand")
-		or character:FindFirstChild("Right Arm")
-		or character:FindFirstChild("HumanoidRootPart")
-	if not rightHand or not rightHand:IsA("BasePart") then
-		return
-	end
-
-	local folder = Instance.new("Folder")
-	folder.Name = toolFolderName
-	folder.Parent = character
-
-	local length = if def.slot == "Primary" then 3.2 else 1.6
-	local thickness = if def.pellets > 1 then 0.55 else 0.35
-
-	local barrel = Instance.new("Part")
-	barrel.Name = "Barrel"
-	barrel.Size = Vector3.new(thickness, thickness, length)
-	barrel.Color = def.color
-	barrel.Material = Enum.Material.Metal
-	barrel.CanCollide = false
-	barrel.Massless = true
-	barrel.CastShadow = false
-	barrel.Parent = folder
-
-	local weld = Instance.new("Weld")
-	weld.Part0 = rightHand
-	weld.Part1 = barrel
-	weld.C0 = CFrame.new(0, -0.2, -length * 0.35)
-	weld.Parent = barrel
-end
 
 function LoadoutService.clear(player: Player?)
 	if player then
 		loadouts[player] = nil
 		if player.Character then
-			clearVisual(player.Character)
+			WeaponVisuals.clearFromCharacter(player.Character)
 		end
 		return
 	end
@@ -87,7 +42,11 @@ function LoadoutService.equipWeapon(player: Player, def: WeaponDefs.WeaponDef): 
 		magazineSize = def.magazine,
 	}
 	loadouts[player] = loadout
-	attachVisual(player, def)
+
+	local character = player.Character
+	if character then
+		WeaponVisuals.attachToCharacter(character, def.id)
+	end
 
 	local role = TeamService.getRole(player)
 	player:SetAttribute("PrimaryDisabled", role == Enums.Role.President)
@@ -101,7 +60,6 @@ function LoadoutService.grant(player: Player): Loadout
 	local role = TeamService.getRole(player)
 	local def = WeaponDefs.defaultPistol(side)
 
-	-- President pistol lock marker (gate 2 enforcement lives in Buy/Weapon services).
 	if role == Enums.Role.President then
 		player:SetAttribute("PrimaryDisabled", true)
 	else
@@ -143,11 +101,11 @@ function LoadoutService.consumeAmmo(player: Player): boolean
 	return true
 end
 
--- Explicitly no corpse weapon pickups — there is no API to loot another player.
 function LoadoutService.denyPickup(_player: Player)
 	return false
 end
 
+-- Re-attach visual after respawn if loadout still held.
 Players.PlayerRemoving:Connect(function(player)
 	loadouts[player] = nil
 end)
