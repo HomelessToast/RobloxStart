@@ -417,7 +417,8 @@ remotes:WaitForChild(Net.MovementState).OnClientEvent:Connect(function(payload)
 			playRollAnim(humanoid)
 		end
 	elseif wasDodging and not serverDodging then
-		stopRollAnim(0.1)
+		-- Instant stop so joint poses don't blend back toward pre-roll bind and look like a snap.
+		stopRollAnim(0)
 	end
 
 	-- If server dropped our sprint (empty stamina), clear local hold intent mirror.

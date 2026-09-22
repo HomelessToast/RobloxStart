@@ -4,10 +4,10 @@
 
 	Client sends SprintIntent / DodgeRequest; server owns stamina, cooldown,
 	WalkSpeed, and the roll travel. Dodge keeps HumanoidRootPart upright
-	(AlignOrientation) and slides on a locked flat axis (LinearVelocity) —
-	never Physics-state CFrame pitching (that caused fling / random facing /
-	camera desync). Client plays the somersault AnimationTrack from
-	MovementState.dodging. Design §5.3 originally reserved the roll for the
+	(AlignOrientation) and drives XZ from a locked startPos each Heartbeat
+	under server network ownership — exit CFrame uses the final slide sample
+	(never a stale pre-dodge Position). Client plays the somersault AnimationTrack
+	from MovementState.dodging. Design §5.3 originally reserved the roll for the
 	President — this slice unifies Q dodge for all roles (see docs/vip-movement.md).
 ]]
 
@@ -167,6 +167,23 @@ local function destroyDodgeConstraints(rt: Runtime)
 	end
 end
 
+local function trySetNetworkOwner(root: BasePart, owner: Player?)
+	pcall(function()
+		root:SetNetworkOwner(owner)
+	end)
+end
+
+--- XZ slide target from locked origin; preserves Y from the live root (gravity/steps).
+local function slidePosition(
+	startPos: Vector3,
+	flat: Vector3,
+	traveled: number,
+	liveY: number
+): Vector3
+	local planar = startPos + flat * traveled
+	return Vector3.new(planar.X, liveY, planar.Z)
+end
+
 local function setDodgeRagdollGuards(humanoid: Humanoid, enabled: boolean)
 	humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, enabled)
 	humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, enabled)
@@ -200,6 +217,7 @@ local function stopDodge(player: Player, rt: Runtime)
 		local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
 		if root then
 			root.AssemblyAngularVelocity = Vector3.zero
+			trySetNetworkOwner(root, player)
 		end
 		if humanoid then
 			humanoid.AutoRotate = true
@@ -421,9 +439,13 @@ function AbilityService.handleDodgeRequest(player: Player, _payload: any)
 		humanoid:ChangeState(Enum.HumanoidStateType.Running)
 	end
 
-	-- Snap upright on the travel axis; zero spin so AlignOrientation starts clean.
+	-- Server-sim during the slide so Position stays authoritative. Client ownership
+	-- left stillRoot.Position stale; exit CFrame then teleported back to pre-dodge.
+	trySetNetworkOwner(root, nil)
+
+	local startPos = root.Position
 	root.AssemblyAngularVelocity = Vector3.zero
-	root.CFrame = uprightCFrame(root.Position, flat)
+	root.CFrame = uprightCFrame(startPos, flat)
 	local startVelY = math.clamp(root.AssemblyLinearVelocity.Y, -6, 2)
 	root.AssemblyLinearVelocity = Vector3.new(flat.X * speed, startVelY, flat.Z * speed)
 
@@ -432,6 +454,7 @@ function AbilityService.handleDodgeRequest(player: Player, _payload: any)
 	attachment.Parent = root
 	rt.dodgeAttachment = attachment
 
+	-- Orientation lock only — XZ is Heartbeat-driven from startPos (no exit snap).
 	local align = Instance.new("AlignOrientation")
 	align.Name = "VIPDodgeAlign"
 	align.Mode = Enum.OrientationAlignmentMode.OneAttachment
@@ -441,23 +464,9 @@ function AbilityService.handleDodgeRequest(player: Player, _payload: any)
 	align.Parent = root
 	rt.dodgeAlign = align
 
-	local mass = math.max(root.AssemblyMass, 1)
-	local maxAxis = mass * dodge.MaxForcePerMass
-	local linear = Instance.new("LinearVelocity")
-	linear.Name = "VIPDodgeVelocity"
-	linear.Attachment0 = attachment
-	linear.RelativeTo = Enum.ActuatorRelativeTo.World
-	linear.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
-	linear.VectorVelocity = Vector3.new(flat.X * speed, 0, flat.Z * speed)
-	linear.ForceLimitsEnabled = true
-	linear.ForceLimitMode = Enum.ForceLimitMode.PerAxis
-	-- Finite XZ force, zero Y ⇒ gravity/ground normal untouched; walls don't sky-fling.
-	linear.MaxAxesForce = Vector3.new(maxAxis, 0, maxAxis)
-	linear.Parent = root
-	rt.dodgeVelocity = linear
-
 	local elapsed = 0
 	local finished = false
+	local lastPos = startPos
 	rt.dodgeConn = RunService.Heartbeat:Connect(function(dt)
 		if finished then
 			return
@@ -477,16 +486,36 @@ function AbilityService.handleDodgeRequest(player: Player, _payload: any)
 			destroyDodgeConstraints(rt)
 			rt.dodgeUntil = 0
 			if stillRoot and stillHum and stillHum.Health > 0 then
+				-- Land at the final slide sample — never re-read a pre-slide Position.
+				local traveled = math.clamp(elapsed, 0, dodge.Duration) * speed
+				traveled = math.min(traveled, dodge.Distance)
+				local endPos = slidePosition(startPos, flat, traveled, stillRoot.Position.Y)
+				local alongLast = (Vector3.new(lastPos.X, 0, lastPos.Z) - Vector3.new(
+					startPos.X,
+					0,
+					startPos.Z
+				)):Dot(flat)
+				if alongLast > traveled then
+					endPos = slidePosition(startPos, flat, alongLast, stillRoot.Position.Y)
+				end
 				stillRoot.AssemblyAngularVelocity = Vector3.zero
-				stillRoot.CFrame = uprightCFrame(stillRoot.Position, flat)
+				stillRoot.CFrame = uprightCFrame(endPos, flat)
 				local landSpeed = GameConfig.WalkSpeed
 				local vy = math.clamp(stillRoot.AssemblyLinearVelocity.Y, -10, 4)
 				stillRoot.AssemblyLinearVelocity =
 					Vector3.new(flat.X * landSpeed, vy, flat.Z * landSpeed)
+				trySetNetworkOwner(stillRoot, player)
 				restoreHumanoidAfterDodge(player, stillHum, savedJumpPower, savedJumpHeight)
 				rt.savedJumpPower = nil
 				rt.savedJumpHeight = nil
 				applyWalkSpeed(player, rt)
+			elseif stillRoot then
+				trySetNetworkOwner(stillRoot, player)
+				if stillHum then
+					restoreHumanoidAfterDodge(player, stillHum, savedJumpPower, savedJumpHeight)
+				end
+				rt.savedJumpPower = nil
+				rt.savedJumpHeight = nil
 			elseif stillHum then
 				restoreHumanoidAfterDodge(player, stillHum, savedJumpPower, savedJumpHeight)
 				rt.savedJumpPower = nil
@@ -496,8 +525,15 @@ function AbilityService.handleDodgeRequest(player: Player, _payload: any)
 			return
 		end
 
-		-- Keep angular velocity crushed; LinearVelocity + AlignOrientation own the rest.
+		local alpha = math.clamp(elapsed / dodge.Duration, 0, 1)
+		local traveled = dodge.Distance * alpha
+		local pos = slidePosition(startPos, flat, traveled, stillRoot.Position.Y)
+		lastPos = pos
 		stillRoot.AssemblyAngularVelocity = Vector3.zero
+		local vy = math.clamp(stillRoot.AssemblyLinearVelocity.Y, -16, 6)
+		stillRoot.AssemblyLinearVelocity = Vector3.new(flat.X * speed, vy, flat.Z * speed)
+		stillRoot.CFrame = uprightCFrame(pos, flat)
+
 		if
 			stillHum:GetState() == Enum.HumanoidStateType.Physics
 			or stillHum:GetState() == Enum.HumanoidStateType.Ragdoll
