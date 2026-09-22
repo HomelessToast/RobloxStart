@@ -45,7 +45,7 @@ local GameConfig = {
 
 	--[[
 		TEMP / DEV-ONLY — solo playtest pad on the lobby deck.
-		Matthew: walk onto it to skip matchmaking and jump into LIVE with a gun.
+		Matthew: walk onto it to skip matchmaking and jump into BUY (same 30s gun UI).
 		Kill-switch: set Enabled = false (pad is not built; RoundService ignores it).
 		Remove this block + LobbyService debug builders + RoundService debug start for prod.
 	]]
@@ -54,12 +54,12 @@ local GameConfig = {
 		-- North edge of deck (toward city), in the center gap between Day/Night pads.
 		ZoneLocalOffset = Vector3.new(0, 0, -17),
 		ZoneSize = Vector3.new(10, 12, 10),
-		-- Usable primary for movement + gunplay (not President pistol-lock).
-		DefaultWeaponId = "M4A1",
 		-- Lighting for the debug match (does not arm Day/Night ready pads).
 		LobbyMode = "Night",
-		-- Seat as Good bodyguard so M4A1 is legal; no President / empty-team auto-wins.
+		-- Seat as Good bodyguard so full Good arsenal is legal; no President / empty-team auto-wins.
 		Side = "Good",
+		-- Huge cash (clamped to Economy.CashCap) so solo debug can buy freely.
+		GrantCash = 12000,
 	},
 
 	-- Combat
@@ -131,13 +131,17 @@ local GameConfig = {
 	},
 
 	-- Dodge / roll (Q) — unified for all characters (was President-only in design §5.3).
-	-- Forward somersault along locked MoveDirection/facing; see docs/vip-movement.md.
+	-- Server: upright AlignOrientation + LinearVelocity on locked flat axis.
+	-- Client: procedural forward-roll AnimationTrack (HRP never pitches).
+	-- See docs/vip-movement.md.
 	Dodge = {
 		Distance = 55, -- studs horizontal (covers §7.5 open-ground gaps ≤60)
-		Duration = 0.4, -- seconds of forced travel + one full forward pitch roll
+		Duration = 0.45, -- travel window; client rolls one somersault over this
 		RecoverySeconds = 0.3, -- cannot fire until recovery ends
 		CooldownSeconds = 30, -- starts on activation; HUD bottom-left shows remaining
 		GroundRayLength = 4, -- must be near ground to roll
+		-- Horizontal force cap as multiples of AssemblyMass (finite ⇒ no wall fling).
+		MaxForcePerMass = 9000,
 	},
 
 	-- Greybox layout. Anchor world positions live in MapMetrics; path ribbons

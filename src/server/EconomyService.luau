@@ -41,6 +41,13 @@ function EconomyService.getCash(player: Player): number
 	return cash[player] :: number
 end
 
+function EconomyService.setCash(player: Player, amount: number): number
+	ensurePlayer(player)
+	cash[player] = clampCash(amount)
+	EconomyService.push(player)
+	return cash[player] :: number
+end
+
 function EconomyService.getLossStreak(teamId: string): number
 	return lossStreakByTeam[teamId] or 0
 end

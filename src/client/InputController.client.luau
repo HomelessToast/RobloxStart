@@ -34,6 +34,37 @@ local function currentCamera(): Camera?
 	return Workspace.CurrentCamera
 end
 
+--[[
+	Aim through the screen center (crosshair), not camera.LookVector from the chest.
+	Root cause of 3rd-person miss: in 3rd person the camera sits behind/above the
+	character, so LookVector-from-chest is parallel to the camera but does not pass
+	through the aim point under the crosshair. 1st person hid the bug (camera ≈ head).
+]]
+local function aimDirectionFromScreen(origin: Vector3, character: Model, fallback: Vector3): Vector3
+	local camera = currentCamera()
+	if not camera then
+		return fallback
+	end
+
+	local viewport = camera.ViewportSize
+	local ray = camera:ViewportPointToRay(viewport.X * 0.5, viewport.Y * 0.5)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { character }
+	params.IgnoreWater = true
+
+	local hit = Workspace:Raycast(ray.Origin, ray.Direction * GameConfig.MaxShotDistance, params)
+	local aimPoint = if hit
+		then hit.Position
+		else ray.Origin + ray.Direction * GameConfig.MaxShotDistance
+
+	local delta = aimPoint - origin
+	if delta.Magnitude < 0.25 then
+		return ray.Direction.Unit
+	end
+	return delta.Unit
+end
+
 local function sendSprint(sprinting: boolean)
 	sprintIntent:FireServer({ sprinting = sprinting })
 end
@@ -144,9 +175,8 @@ local function fire()
 	end
 	lastClientShot = now
 
-	local camera = currentCamera()
 	local origin = root.Position + Vector3.new(0, 1.5, 0)
-	local direction = if camera then camera.CFrame.LookVector else root.CFrame.LookVector
+	local direction = aimDirectionFromScreen(origin, character, root.CFrame.LookVector)
 
 	fireShot:FireServer({
 		origin = origin,

@@ -18,7 +18,6 @@ local RunService = game:GetService("RunService")
 local GameConfig = require(ReplicatedStorage.Shared.GameConfig)
 local Enums = require(ReplicatedStorage.Shared.Enums)
 local Net = require(ReplicatedStorage.Shared.Net)
-local WeaponDefs = require(ReplicatedStorage.Shared.WeaponDefs)
 
 local Remotes = require(script.Parent.Remotes)
 local MapService = require(script.Parent.MapService)
@@ -483,37 +482,10 @@ end
 
 --[[
 	TEMP debug solo playtest — walk-on pad in LobbyService.
-	Skips min-player / buy phase, grants Debug.DefaultWeaponId, suppresses empty-team wins.
+	Skips min-player gate, keeps the normal 30s BUY picture UI (no auto-M4A1),
+	grants Debug.GrantCash so Matthew can buy freely, suppresses empty-team wins.
 	Remove with GameConfig.Debug + LobbyService DEBUG_* builders.
 ]]
-local function prepareDebugPlayers(players: { Player })
-	for _, player in players do
-		if not player.Character then
-			respawnPlayer(player)
-		end
-	end
-	task.wait(0.5)
-	PlayerStateService.resetAllArmor()
-	LoadoutService.clear()
-	local weaponId = GameConfig.Debug.DefaultWeaponId
-	local def = WeaponDefs.get(weaponId)
-	assert(def, "[RoundService] Debug.DefaultWeaponId missing: " .. tostring(weaponId))
-	for _, player in players do
-		if player.Character then
-			local teamId = TeamService.getTeamId(player)
-			if teamId then
-				EconomyService.setTeam(player, teamId)
-			end
-			PlayerStateService.resetArmor(player)
-			SpawnService.prepareCharacter(player)
-			LoadoutService.equipWeapon(player, def)
-			SpawnService.setFrozen(player, false)
-			WeaponService.pushPlayerState(player)
-			EconomyService.push(player)
-		end
-	end
-end
-
 local function startDebugSoloFromLobby(players: { Player })
 	transitioning = true
 	ending = false
@@ -541,16 +513,42 @@ local function startDebugSoloFromLobby(players: { Player })
 
 		TeamService.assignDebugSolo(players, GameConfig.Debug.Side)
 		LobbyService.applyMatchLighting(mode)
-		prepareDebugPlayers(players)
+
+		local grantCash = GameConfig.Debug.GrantCash
+		for _, player in players do
+			local teamId = TeamService.getTeamId(player)
+			if teamId then
+				EconomyService.setTeam(player, teamId)
+			end
+			EconomyService.setCash(player, grantCash)
+		end
+
+		-- Same BUY path as live matches: freeze at spawn, default pistol, 30s menu.
+		prepareBuyPlayers(players)
+
+		state = Enums.RoundState.Buy
+		timeRemaining = GameConfig.BuyPhaseSeconds
+		BuyService.setOpen(true)
+		transitioning = false
+		broadcastRound()
+		pushAllPlayerStates()
 
 		announce(
 			string.format(
-				"DEBUG SOLO LIVE — %s · walk off pad next time to use Day/Night",
-				GameConfig.Debug.DefaultWeaponId
+				"DEBUG SOLO BUY — $%d · pick a gun (%ds) · Day/Night pads still for real matches",
+				grantCash,
+				GameConfig.BuyPhaseSeconds
 			),
 			"warning"
 		)
-		beginLive()
+		print(
+			string.format(
+				"[RoundService] DEBUG solo BUY (%ds) cash=%d players=%d",
+				GameConfig.BuyPhaseSeconds,
+				grantCash,
+				#players
+			)
+		)
 	end)
 	if not ok then
 		warn("[RoundService] DEBUG solo start failed: " .. tostring(err))
@@ -562,6 +560,7 @@ local function startDebugSoloFromLobby(players: { Player })
 		timeRemaining = 0
 		transitioning = false
 		CombatService.setRoundLive(false)
+		BuyService.setOpen(false)
 		broadcastRound()
 	end
 end

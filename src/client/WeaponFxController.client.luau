@@ -159,7 +159,8 @@ local function toolKick(character: Model, feel: WeaponAudio.FireFeel)
 	if character == localPlayer.Character then
 		local cam = Workspace.CurrentCamera
 		if cam then
-			local punch = CFrame.Angles(math.rad(-feel.kickDegrees * 0.35), 0, 0)
+			-- Mild camera punch; kickDegrees already tuned down for playtest.
+			local punch = CFrame.Angles(math.rad(-feel.kickDegrees * 0.2), 0, 0)
 			cam.CFrame = cam.CFrame * punch
 		end
 	end
