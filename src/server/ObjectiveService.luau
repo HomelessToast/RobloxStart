@@ -125,6 +125,15 @@ function ObjectiveService.objectiveBanner(roundRemaining: number, roundState: st
 	if roundState == Enums.RoundState.RoundEnd then
 		return "ROUND OVER"
 	end
+	if roundState == Enums.RoundState.Intermission then
+		return "INTERMISSION — sides swap next"
+	end
+	if roundState == Enums.RoundState.MatchEnd then
+		return "MATCH OVER"
+	end
+	if roundState == Enums.RoundState.Lobby then
+		return "LOBBY"
+	end
 	if roundRemaining <= GameConfig.CaptureEntryDeadlineRemaining then
 		return "ELIMINATE — capture no longer possible"
 	end

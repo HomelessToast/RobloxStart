@@ -9,24 +9,34 @@ stays the place for playtesting and publishing.
 
 ## What's playable in slice 0
 
-One complete round loop on a **metric-correct** urban greybox (Motorcade / Market /
-Consulate / Precinct):
+One complete **best-of-7 match** loop on a **metric-correct** urban greybox (Motorcade /
+Market / Consulate / Precinct):
 
 | Feature | Status |
 | --- | --- |
-| `LIVE` ↔ `CAPTURE` + `ROUND_END`, 300s clock never pauses | Yes |
+| `LIVE` ↔ `CAPTURE` + `ROUND_END` / `INTERMISSION` / `MATCH_END`, 300s clock never pauses | Yes |
 | Capture: 30s unbroken hold, resets to 0 on leave, entry only before t=270 | Yes |
 | Win reasons: President death, President disconnect, terrorist wipe, timer expiry (incl. mid-capture), capture complete | Yes |
+| Round over → teleport to Day/Night lobby pad; match over → clear scores → lobby queue | Yes |
+| Best of 7 (first to 4), sides alternate every round, HUD score + swap announce | Yes |
+| President: solo Good → that player; else rotate by UserId within the Good team | Yes |
 | Friendly fire off; server-authoritative hits; no weapon pickups | Yes |
-| HUD: round timer, objective banner, capture bar, last-entry warning | Yes |
+| HUD: round timer, score (e.g. 2–1), objective banner, capture bar, last-entry warning | Yes |
 | Metric greybox from `MapMetrics` + `MapService` (git-tracked Parts builder) | Yes |
-| Best of 7, side swap, economy / buy, roll ability, full arsenal | Deferred (slices 1–3) |
+| Economy / buy, roll ability, full arsenal | Parallel / deferred |
 
-Rounds loop forever. Match start is **not** automatic on join — players spawn on the
-elevated **VIP briefing lobby** (south/above the city). Stand in a **Day** or **Night**
-ready pad with **2–10** players to arm that mode’s 5s countdown, then teleport onto
-Motorcade / Market. With 2 players: lowest `UserId` is President (Good), the other is
-Terrorist. Extra players fill bodyguards then terrorists (capped at 10 / 5v5).
+Match start is **not** automatic on join — players spawn on the elevated **VIP briefing
+lobby** (south/above the city). Stand in a **Day** or **Night** ready pad with **2–10**
+players to arm that mode’s 5s countdown. Roster splits into persistent Team A / Team B;
+round 1 seats A=Good / B=Terrorist, then sides swap every round. Between rounds everyone
+returns to the armed ready pad for intermission, then auto-continues. After a team reaches
+4 wins, match end clears the scoreboard for a fresh queue.
+
+### President assignment
+
+- If only **one** player is on the Good/VIP side, they are President.
+- Otherwise the Good side rotates the role by stable `UserId` order (per-team cursor in
+  `MatchService`), so each team shares President duty across the bo7.
 
 ## Repo layout
 
@@ -86,7 +96,8 @@ Metric distances above are unchanged. Massing follows a **real city grid** hiera
    rotate (§7.5).
 
 Art is still colored Parts only — modular dress is deferred until these metrics
-pass playtest. Economy / best-of-7 / weapons expansion stays out of this PR.
+pass playtest. Economy / weapons expansion is parallel work on this PR; match flow
+(bo7 + side swap) is live — see `MatchService` / `RoundService`.
 
 ## Local setup
 

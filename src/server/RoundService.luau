@@ -1,6 +1,14 @@
 --!strict
--- Owns the round state machine and the 300s LIVE clock. Nothing may pause or extend that clock.
--- Lobby start is gated by Day/Night ready pads on the elevated VIPLobby deck.
+--[[
+	Round + match state machine.
+
+	  LOBBY → LIVE ⇄ CAPTURE → ROUND_END → INTERMISSION → LIVE …
+	                                 └→ MATCH_END → LOBBY
+
+	Lobby start is gated by Day/Night ready pads (LobbyService). Mid-match
+	rounds auto-continue with the same roster after INTERMISSION — players are
+	teleported back to the armed ready pad between rounds, then onto the map.
+]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -13,6 +21,7 @@ local Net = require(ReplicatedStorage.Shared.Net)
 local Remotes = require(script.Parent.Remotes)
 local MapService = require(script.Parent.MapService)
 local LobbyService = require(script.Parent.LobbyService)
+local MatchService = require(script.Parent.MatchService)
 local TeamService = require(script.Parent.TeamService)
 local SpawnService = require(script.Parent.SpawnService)
 local LoadoutService = require(script.Parent.LoadoutService)
@@ -24,21 +33,34 @@ local ObjectiveService = require(script.Parent.ObjectiveService)
 local RoundService = {}
 
 local state = Enums.RoundState.Lobby
-local roundNumber = 0
 local timeRemaining = 0
 local lobbyCountdown = 0
 local ending = false
+local transitioning = false -- true while a yielding transition (beginLive / match start) runs
 local heartbeatConn: RBXScriptConnection? = nil
 local broadcastAccum = 0
 local BROADCAST_INTERVAL = 0.25
+local lastAnnouncement: string? = nil
 
 -- Which ready pad armed the current lobby countdown (nil = waiting for a zone).
 local pendingMode: LobbyService.LobbyMode? = nil
--- Roster captured when LIVE begins (players standing in the armed zone, capped at 10).
-local matchRoster: { Player } = {}
+-- Last committed round resolution (shown through ROUND_END / INTERMISSION).
+local lastResolution: ObjectiveService.Resolution? = nil
+local lastCommit: MatchService.RoundCommit? = nil
+
+local function announce(text: string, kind: string?)
+	lastAnnouncement = text
+	Remotes.get(Net.HudBanner):FireAllClients({
+		text = text,
+		kind = kind or "info",
+	})
+end
 
 local function broadcastRound()
+	local match = MatchService.snapshot()
+	local roundNumber = match.roundIndex
 	local banner = ObjectiveService.objectiveBanner(timeRemaining, state)
+
 	if state == Enums.RoundState.Lobby then
 		local nightN = #LobbyService.getPlayersInZone("Night")
 		local dayN = #LobbyService.getPlayersInZone("Day")
@@ -61,13 +83,46 @@ local function broadcastRound()
 				maxN
 			)
 		end
+	elseif state == Enums.RoundState.RoundEnd and lastResolution then
+		banner = string.format(
+			"ROUND OVER — %s  ·  Score %s",
+			lastResolution.message,
+			match.scoreLine
+		)
+	elseif state == Enums.RoundState.Intermission then
+		local sideNote = if MatchService.didSidesSwapThisRound() or (roundNumber >= 1)
+			then "Teams swap sides"
+			else "Opening sides"
+		-- During intermission we are *about* to play roundIndex+1 after beginNextRound
+		-- has already advanced — beginNextRound runs at INTERMISSION entry, so
+		-- roundIndex is already the upcoming round number.
+		banner = string.format(
+			"Round %d · %s · Score %s (first to %d)",
+			roundNumber,
+			sideNote,
+			match.scoreLine,
+			GameConfig.MatchWinsNeeded
+		)
+	elseif state == Enums.RoundState.MatchEnd then
+		local winner = if lastCommit and lastCommit.matchWinner
+			then string.format("Team %s", lastCommit.matchWinner)
+			else "—"
+		banner = string.format("MATCH OVER — %s wins  %s", winner, match.scoreLine)
 	end
+
 	Remotes.get(Net.RoundState):FireAllClients({
 		state = state,
 		timeRemaining = math.max(timeRemaining, 0),
 		roundNumber = roundNumber,
 		objectiveBanner = banner,
-		lobbyMode = pendingMode,
+		lobbyMode = match.lobbyMode or pendingMode,
+		scoreLine = match.scoreLine,
+		winsA = match.winsA,
+		winsB = match.winsB,
+		winsNeeded = match.winsNeeded,
+		sideA = match.sideA,
+		sideB = match.sideB,
+		announcement = lastAnnouncement,
 	})
 end
 
@@ -89,23 +144,40 @@ local function respawnPlayer(player: Player)
 	player:LoadCharacter()
 end
 
-local function returnEveryoneToLobby()
+-- Yielding teleports run off Heartbeat so the round clock never stalls mid-step.
+local function teleportRosterToLobbyPad(mode: LobbyService.LobbyMode?)
+	task.spawn(function()
+		for _, player in Players:GetPlayers() do
+			if not player.Character then
+				respawnPlayer(player)
+			end
+		end
+		task.wait(0.4)
+		for _, player in Players:GetPlayers() do
+			SpawnService.teleportToReadyPad(player, mode)
+		end
+	end)
+end
+
+local function returnEveryoneToLobbySpawn()
 	LobbyService.applyLobbyLighting()
 	pendingMode = nil
 	lobbyCountdown = 0
-	table.clear(matchRoster)
-	for _, player in Players:GetPlayers() do
-		if not player.Character then
-			respawnPlayer(player)
+	task.spawn(function()
+		for _, player in Players:GetPlayers() do
+			if not player.Character then
+				respawnPlayer(player)
+			end
 		end
-	end
-	task.wait(0.4)
-	for _, player in Players:GetPlayers() do
-		SpawnService.teleportToLobby(player)
-	end
+		task.wait(0.4)
+		for _, player in Players:GetPlayers() do
+			SpawnService.teleportToLobby(player)
+		end
+	end)
 end
 
 local function prepareMatchPlayers(players: { Player })
+	-- Called only from beginLive, which is itself deferred off Heartbeat.
 	for _, player in players do
 		if not player.Character then
 			respawnPlayer(player)
@@ -129,6 +201,59 @@ function RoundService.getTimeRemaining(): number
 	return timeRemaining
 end
 
+local function enterMatchEnd()
+	state = Enums.RoundState.MatchEnd
+	ending = false
+	CombatService.setRoundLive(false)
+	CaptureService.stopMonitoring()
+	timeRemaining = GameConfig.MatchEndSeconds
+
+	local match = MatchService.snapshot()
+	local winnerLabel = if lastCommit and lastCommit.matchWinner
+		then string.format("Team %s", lastCommit.matchWinner)
+		else "—"
+	Remotes.get(Net.MatchEnded):FireAllClients({
+		winnerTeam = if lastCommit then lastCommit.matchWinner else nil,
+		scoreLine = match.scoreLine,
+		winsA = match.winsA,
+		winsB = match.winsB,
+	})
+	announce(string.format("MATCH OVER — %s wins (%s)", winnerLabel, match.scoreLine), "warning")
+	teleportRosterToLobbyPad(match.lobbyMode :: LobbyService.LobbyMode?)
+	broadcastRound()
+	print(string.format("[RoundService] Match end: %s (%s)", winnerLabel, match.scoreLine))
+end
+
+local function enterIntermission()
+	state = Enums.RoundState.Intermission
+	ending = false
+	CombatService.setRoundLive(false)
+	CaptureService.stopMonitoring()
+	CaptureService.reset()
+	timeRemaining = GameConfig.IntermissionSeconds
+
+	-- Advance round index now so HUD / side mapping show the *upcoming* round.
+	if not MatchService.beginNextRound() then
+		enterMatchEnd()
+		return
+	end
+
+	local match = MatchService.snapshot()
+	local mode = match.lobbyMode :: LobbyService.LobbyMode?
+	local swapText = if MatchService.getRoundIndex() == 1
+		then string.format("Round %d — Team A Good · Team B Terrorist", match.roundIndex)
+		else string.format(
+			"Round %d — sides swapped · A=%s  B=%s · Score %s",
+			match.roundIndex,
+			match.sideA,
+			match.sideB,
+			match.scoreLine
+		)
+	announce(swapText, "info")
+	teleportRosterToLobbyPad(mode)
+	broadcastRound()
+end
+
 local function enterRoundEnd(resolution: ObjectiveService.Resolution)
 	if ending then
 		return
@@ -138,34 +263,70 @@ local function enterRoundEnd(resolution: ObjectiveService.Resolution)
 	CombatService.setRoundLive(false)
 	CaptureService.stopMonitoring()
 	timeRemaining = GameConfig.RoundEndSeconds
+	lastResolution = resolution
+
+	local commit = MatchService.commitRoundWin(resolution.winnerSide)
+	lastCommit = commit
+	local match = MatchService.snapshot()
 
 	Remotes.get(Net.RoundEnded):FireAllClients({
 		winnerSide = resolution.winnerSide,
 		reason = resolution.reason,
 		message = resolution.message,
+		scoreLine = match.scoreLine,
+		winningTeam = commit.winningTeam,
+		winsA = commit.winsA,
+		winsB = commit.winsB,
+		matchOver = commit.matchOver,
 	})
+	announce(string.format("%s · Score %s", resolution.message, match.scoreLine), "warning")
+
+	-- Matthew: round over → teleport everyone back to lobby (ready pad).
+	local mode = match.lobbyMode :: LobbyService.LobbyMode?
+	teleportRosterToLobbyPad(mode)
 	broadcastRound()
 	print(
 		string.format(
-			"[RoundService] Round %d ended: %s (%s)",
-			roundNumber,
+			"[RoundService] Round %d ended: %s (%s) score=%s matchOver=%s",
+			match.roundIndex,
 			resolution.reason,
-			resolution.message
+			resolution.message,
+			match.scoreLine,
+			tostring(commit.matchOver)
 		)
 	)
 end
 
-local function beginLive(mode: LobbyService.LobbyMode, players: { Player })
+local function beginLive()
+	transitioning = true
 	ending = false
-	roundNumber += 1
+	lastAnnouncement = nil
 	ObjectiveService.resetFlags()
 	WeaponService.reset()
 	LoadoutService.clear()
 	CaptureService.reset()
 
-	matchRoster = table.clone(players)
+	local players = MatchService.getRoster()
+	if #players < GameConfig.MinPlayersToStart then
+		-- Roster collapsed — abandon match back to lobby queue.
+		MatchService.reset()
+		TeamService.reset()
+		state = Enums.RoundState.Lobby
+		pendingMode = nil
+		lobbyCountdown = 0
+		timeRemaining = 0
+		transitioning = false
+		returnEveryoneToLobbySpawn()
+		announce("Not enough players — back to lobby", "break")
+		broadcastRound()
+		return
+	end
+
 	TeamService.assignForRound(players)
-	LobbyService.applyMatchLighting(mode)
+	local mode = MatchService.getLobbyMode()
+	if mode == "Day" or mode == "Night" then
+		LobbyService.applyMatchLighting(mode)
+	end
 	prepareMatchPlayers(players)
 
 	state = Enums.RoundState.Live
@@ -174,19 +335,46 @@ local function beginLive(mode: LobbyService.LobbyMode, players: { Player })
 	lobbyCountdown = 0
 	CombatService.setRoundLive(true)
 	CaptureService.startMonitoring()
+	transitioning = false
 	broadcastRound()
 	pushAllPlayerStates()
 
 	local prez = TeamService.getPresident()
+	local match = MatchService.snapshot()
+	announce(
+		string.format(
+			"Round %d LIVE · Score %s · President %s",
+			match.roundIndex,
+			match.scoreLine,
+			if prez then prez.Name else "?"
+		),
+		"info"
+	)
 	print(
 		string.format(
-			"[RoundService] Round %d LIVE (%s) — President=%s, players=%d",
-			roundNumber,
-			mode,
+			"[RoundService] Round %d LIVE (%s) — President=%s, A=%s B=%s score=%s players=%d",
+			match.roundIndex,
+			tostring(mode),
 			if prez then prez.Name else "?",
+			match.sideA,
+			match.sideB,
+			match.scoreLine,
 			#players
 		)
 	)
+end
+
+local function startMatchFromLobby(mode: LobbyService.LobbyMode, players: { Player })
+	transitioning = true
+	MatchService.beginMatch(players, mode)
+	if not MatchService.beginNextRound() then
+		MatchService.reset()
+		transitioning = false
+		return
+	end
+	pendingMode = nil
+	lobbyCountdown = 0
+	beginLive()
 end
 
 local function pickArmedZone(): (LobbyService.LobbyMode?, { Player })
@@ -218,8 +406,22 @@ local function pickArmedZone(): (LobbyService.LobbyMode?, { Player })
 	return nil, {}
 end
 
+local function isMatchPlayState(): boolean
+	return state == Enums.RoundState.Live or state == Enums.RoundState.Capture
+end
+
 function RoundService.step(dt: number)
+	if transitioning then
+		broadcastRoundThrottled(dt)
+		return
+	end
+
 	if state == Enums.RoundState.Lobby then
+		-- Ignore pad arming while a match is somehow still marked active.
+		if MatchService.isActive() then
+			MatchService.reset()
+		end
+
 		local mode, _ = pickArmedZone()
 		if not mode then
 			pendingMode = nil
@@ -239,7 +441,6 @@ function RoundService.step(dt: number)
 		broadcastRoundThrottled(dt)
 
 		if lobbyCountdown <= 0 then
-			-- Re-sample at go-time so leavers aren't teleported; cap at 10.
 			local roster = LobbyService.takeMatchRoster(mode)
 			if #roster < GameConfig.MinPlayersToStart then
 				pendingMode = nil
@@ -248,7 +449,12 @@ function RoundService.step(dt: number)
 				broadcastRound()
 				return
 			end
-			beginLive(mode, roster)
+			pendingMode = nil
+			lobbyCountdown = 0
+			transitioning = true
+			task.spawn(function()
+				startMatchFromLobby(mode, roster)
+			end)
 		end
 		return
 	end
@@ -257,20 +463,46 @@ function RoundService.step(dt: number)
 		timeRemaining -= dt
 		broadcastRoundThrottled(dt)
 		if timeRemaining <= 0 then
-			-- Slice 0: loop forever, no match score / side swap.
-			state = Enums.RoundState.Lobby
-			ending = false
-			CombatService.setRoundLive(false)
-			CaptureService.reset()
+			if lastCommit and lastCommit.matchOver then
+				enterMatchEnd()
+			else
+				enterIntermission()
+			end
+		end
+		return
+	end
+
+	if state == Enums.RoundState.Intermission then
+		timeRemaining -= dt
+		broadcastRoundThrottled(dt)
+		if timeRemaining <= 0 then
+			transitioning = true
+			task.spawn(beginLive)
+		end
+		return
+	end
+
+	if state == Enums.RoundState.MatchEnd then
+		timeRemaining -= dt
+		broadcastRoundThrottled(dt)
+		if timeRemaining <= 0 then
+			MatchService.reset()
 			TeamService.reset()
-			returnEveryoneToLobby()
+			lastResolution = nil
+			lastCommit = nil
+			lastAnnouncement = nil
+			ending = false
+			state = Enums.RoundState.Lobby
+			timeRemaining = 0
+			returnEveryoneToLobbySpawn()
+			announce("Scores cleared — stand in a ready pad to queue", "info")
 			broadcastRound()
 		end
 		return
 	end
 
 	-- LIVE or CAPTURE: 300s clock always ticks
-	if state == Enums.RoundState.Live or state == Enums.RoundState.Capture then
+	if isMatchPlayState() then
 		timeRemaining -= dt
 
 		if CaptureService.isActive() then
@@ -290,27 +522,22 @@ function RoundService.step(dt: number)
 end
 
 function RoundService.onPlayerDied(victim: Player, killer: Player?)
-	if state ~= Enums.RoundState.Live and state ~= Enums.RoundState.Capture then
+	if not isMatchPlayState() then
 		return
 	end
 	WeaponService.pushPlayerState(victim)
 
 	if TeamService.getRole(victim) == Enums.Role.President then
 		ObjectiveService.noticePresidentDeath(killer)
-		local resolution = ObjectiveService.evaluate(timeRemaining)
-		if resolution then
-			enterRoundEnd(resolution)
-		end
-	else
-		local resolution = ObjectiveService.evaluate(timeRemaining)
-		if resolution then
-			enterRoundEnd(resolution)
-		end
+	end
+	local resolution = ObjectiveService.evaluate(timeRemaining)
+	if resolution then
+		enterRoundEnd(resolution)
 	end
 end
 
 function RoundService.onPlayerRemoving(player: Player)
-	if state ~= Enums.RoundState.Live and state ~= Enums.RoundState.Capture then
+	if not isMatchPlayState() then
 		TeamService.clearPlayer(player)
 		return
 	end
@@ -330,8 +557,14 @@ function RoundService.onPlayerRemoving(player: Player)
 	end
 end
 
+local function shouldParkInLobby(): boolean
+	return state == Enums.RoundState.Lobby
+		or state == Enums.RoundState.RoundEnd
+		or state == Enums.RoundState.Intermission
+		or state == Enums.RoundState.MatchEnd
+end
+
 function RoundService.init()
-	-- Greybox + MapValidator + Lobby run in Bootstrap.server before this init.
 	assert(
 		MapService.getFolder(),
 		"[RoundService] VIPMap missing — Bootstrap must build the map first"
@@ -344,7 +577,7 @@ function RoundService.init()
 		return timeRemaining
 	end)
 	CaptureService.setCompletedCallback(function()
-		if state == Enums.RoundState.Live or state == Enums.RoundState.Capture then
+		if isMatchPlayState() then
 			local resolution = ObjectiveService.evaluate(timeRemaining)
 			if resolution then
 				enterRoundEnd(resolution)
@@ -362,13 +595,16 @@ function RoundService.init()
 
 	Players.PlayerAdded:Connect(function(player)
 		player.CharacterAdded:Connect(function()
-			if state == Enums.RoundState.Lobby or state == Enums.RoundState.RoundEnd then
+			if shouldParkInLobby() then
 				task.defer(function()
-					SpawnService.teleportToLobby(player)
+					local mode = MatchService.getLobbyMode()
+					if mode == "Day" or mode == "Night" then
+						SpawnService.teleportToReadyPad(player, mode)
+					else
+						SpawnService.teleportToLobby(player)
+					end
 				end)
-				return
 			end
-			-- Late join mid-round: spectator only (slice 0 — no mid-round join to teams).
 		end)
 		broadcastRound()
 	end)
@@ -377,12 +613,16 @@ function RoundService.init()
 		RoundService.onPlayerRemoving(player)
 	end)
 
-	-- Already-present players (Studio soft restart) land on the lobby deck.
 	for _, player in Players:GetPlayers() do
 		player.CharacterAdded:Connect(function()
-			if state == Enums.RoundState.Lobby or state == Enums.RoundState.RoundEnd then
+			if shouldParkInLobby() then
 				task.defer(function()
-					SpawnService.teleportToLobby(player)
+					local mode = MatchService.getLobbyMode()
+					if mode == "Day" or mode == "Night" then
+						SpawnService.teleportToReadyPad(player, mode)
+					else
+						SpawnService.teleportToLobby(player)
+					end
 				end)
 			end
 		end)
@@ -401,8 +641,10 @@ function RoundService.init()
 	broadcastRound()
 	print(
 		string.format(
-			"[RoundService] %s lobby ready (Day/Night pads, min=%d max=%d per zone).",
+			"[RoundService] %s ready — bo%d first to %d, Day/Night pads (min=%d max=%d).",
 			GameConfig.GameName,
+			GameConfig.MaxRoundsInMatch,
+			GameConfig.MatchWinsNeeded,
 			GameConfig.MinPlayersToStart,
 			GameConfig.MaxPlayersPerLobbyZone
 		)

@@ -7,6 +7,8 @@ Enums.RoundState = {
 	Live = "LIVE",
 	Capture = "CAPTURE",
 	RoundEnd = "ROUND_END",
+	Intermission = "INTERMISSION",
+	MatchEnd = "MATCH_END",
 }
 
 Enums.Side = {

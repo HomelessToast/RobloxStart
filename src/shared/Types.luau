@@ -2,7 +2,7 @@
 
 export type Side = "Good" | "Terrorist" | "Spectator"
 export type Role = "President" | "Bodyguard" | "Terrorist" | "Unassigned"
-export type RoundState = "LOBBY" | "LIVE" | "CAPTURE" | "ROUND_END"
+export type RoundState = "LOBBY" | "LIVE" | "CAPTURE" | "ROUND_END" | "INTERMISSION" | "MATCH_END"
 export type RoundEndReason =
 	"PRESIDENT_DEATH"
 	| "PRESIDENT_DISCONNECT"
@@ -17,6 +17,14 @@ export type RoundSnapshot = {
 	timeRemaining: number,
 	roundNumber: number,
 	objectiveBanner: string,
+	scoreLine: string?,
+	winsA: number?,
+	winsB: number?,
+	winsNeeded: number?,
+	sideA: string?,
+	sideB: string?,
+	lobbyMode: string?,
+	announcement: string?,
 }
 
 export type CaptureSnapshot = {

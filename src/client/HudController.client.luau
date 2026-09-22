@@ -44,13 +44,19 @@ local function makeLabel(
 end
 
 local timerLabel =
-	makeLabel("Timer", UDim2.new(0.5, 0, 0, 16), UDim2.fromOffset(280, 36), 28, Vector2.new(0.5, 0))
+	makeLabel("Timer", UDim2.new(0.5, 0, 0, 16), UDim2.fromOffset(320, 36), 28, Vector2.new(0.5, 0))
 timerLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+local scoreLabel =
+	makeLabel("Score", UDim2.new(0.5, 0, 0, 48), UDim2.fromOffset(420, 22), 16, Vector2.new(0.5, 0))
+scoreLabel.TextXAlignment = Enum.TextXAlignment.Center
+scoreLabel.Font = Enum.Font.GothamMedium
+scoreLabel.TextColor3 = Color3.fromRGB(180, 200, 230)
 
 local objectiveLabel = makeLabel(
 	"Objective",
-	UDim2.new(0.5, 0, 0, 52),
-	UDim2.new(0.8, 0, 0, 28),
+	UDim2.new(0.5, 0, 0, 70),
+	UDim2.new(0.85, 0, 0, 28),
 	18,
 	Vector2.new(0.5, 0)
 )
@@ -65,7 +71,7 @@ ammoLabel.TextXAlignment = Enum.TextXAlignment.Right
 local banner = Instance.new("TextLabel")
 banner.Name = "Banner"
 banner.AnchorPoint = Vector2.new(0.5, 0)
-banner.Position = UDim2.new(0.5, 0, 0, 96)
+banner.Position = UDim2.new(0.5, 0, 0, 108)
 banner.Size = UDim2.new(0.85, 0, 0, 44)
 banner.BackgroundColor3 = Color3.fromRGB(12, 14, 18)
 banner.BackgroundTransparency = 0.2
@@ -84,7 +90,7 @@ bannerCorner.Parent = banner
 local captureBarBg = Instance.new("Frame")
 captureBarBg.Name = "CaptureBarBg"
 captureBarBg.AnchorPoint = Vector2.new(0.5, 0)
-captureBarBg.Position = UDim2.new(0.5, 0, 0, 148)
+captureBarBg.Position = UDim2.new(0.5, 0, 0, 160)
 captureBarBg.Size = UDim2.new(0.5, 0, 0, 14)
 captureBarBg.BackgroundColor3 = Color3.fromRGB(20, 22, 28)
 captureBarBg.BorderSizePixel = 0
@@ -108,7 +114,7 @@ captureBarFillCorner.Parent = captureBar
 
 local captureLabel = makeLabel(
 	"CaptureLabel",
-	UDim2.new(0.5, 0, 0, 168),
+	UDim2.new(0.5, 0, 0, 180),
 	UDim2.new(0.6, 0, 0, 24),
 	16,
 	Vector2.new(0.5, 0)
@@ -173,13 +179,31 @@ remotes:WaitForChild(Net.RoundState).OnClientEvent:Connect(function(payload)
 	end
 	roundState = payload.state
 	local remaining = payload.timeRemaining or 0
-	timerLabel.Text = string.format(
-		"R%d  %s  %s",
-		payload.roundNumber or 0,
-		tostring(roundState),
-		formatTime(remaining)
-	)
+	local roundNumber = payload.roundNumber or 0
+	timerLabel.Text =
+		string.format("R%d  %s  %s", roundNumber, tostring(roundState), formatTime(remaining))
 	objectiveLabel.Text = payload.objectiveBanner or ""
+
+	local scoreLine = payload.scoreLine
+	local winsNeeded = payload.winsNeeded or 4
+	if scoreLine and roundNumber > 0 then
+		local sideA = payload.sideA or "?"
+		local sideB = payload.sideB or "?"
+		scoreLabel.Text = string.format(
+			"Score %s  (first to %d)  ·  A:%s  B:%s",
+			tostring(scoreLine),
+			winsNeeded,
+			tostring(sideA),
+			tostring(sideB)
+		)
+		scoreLabel.Visible = true
+	elseif scoreLine and tostring(scoreLine) ~= "0–0" then
+		scoreLabel.Text = string.format("Score %s  (first to %d)", tostring(scoreLine), winsNeeded)
+		scoreLabel.Visible = true
+	else
+		scoreLabel.Text = string.format("Best of 7 · first to %d", winsNeeded)
+		scoreLabel.Visible = roundState ~= Enums.RoundState.Lobby or (payload.lobbyMode ~= nil)
+	end
 
 	if
 		remaining <= 30
@@ -226,7 +250,24 @@ remotes:WaitForChild(Net.RoundEnded).OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" then
 		return
 	end
-	showBanner(tostring(payload.message or "Round over"), "warning")
+	local score = payload.scoreLine
+	local msg = tostring(payload.message or "Round over")
+	if score then
+		msg = string.format("%s · %s", msg, tostring(score))
+	end
+	showBanner(msg, "warning")
+end)
+
+remotes:WaitForChild(Net.MatchEnded).OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	local winner = payload.winnerTeam
+	local score = payload.scoreLine or ""
+	local text = if winner
+		then string.format("MATCH OVER — Team %s wins (%s)", tostring(winner), tostring(score))
+		else string.format("MATCH OVER (%s)", tostring(score))
+	showBanner(text, "warning")
 end)
 
 remotes:WaitForChild(Net.PlayerState).OnClientEvent:Connect(function(payload)

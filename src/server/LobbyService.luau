@@ -397,6 +397,15 @@ function LobbyService.getSpawnCFrame(): CFrame
 	return CFrame.new(cfg.Center.X + o.X, top + 4, cfg.Center.Z + o.Z)
 end
 
+--- Center of a Day/Night ready pad (used to return players between rounds).
+function LobbyService.getReadyPadCFrame(mode: LobbyMode): CFrame
+	local zone = LobbyService.getReadyZone(mode)
+	if zone then
+		return zone.CFrame * CFrame.new(0, zone.Size.Y * 0.5 + 3, 0)
+	end
+	return LobbyService.getSpawnCFrame()
+end
+
 function LobbyService.pointInZone(point: Vector3, mode: LobbyMode): boolean
 	local zone = LobbyService.getReadyZone(mode)
 	if not zone then

@@ -1,14 +1,24 @@
 --!strict
--- Slice 0: hard-coded assignment. First good player is President; rest fill 4 BG + 5 T.
+--[[
+	Persistent Team A / Team B come from MatchService. This module maps those
+	teams onto Good / Terrorist for the current round and assigns the President.
 
-local Players = game:GetService("Players")
+	President rule (slice match flow):
+	  • If only one player is on the Good/VIP side → that player is President.
+	  • Otherwise rotate among the Good side by stable UserId order (cursor
+	    owned by MatchService per persistent team so each side shares the role
+	    fairly across the bo7).
+]]
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Enums = require(ReplicatedStorage.Shared.Enums)
+local MatchService = require(script.Parent.MatchService)
 
 export type Assignment = {
 	side: string,
 	role: string,
+	teamId: string?, -- "A" | "B" while a match is active
 }
 
 local TeamService = {}
@@ -16,43 +26,47 @@ local TeamService = {}
 local assignments: { [Player]: Assignment } = {}
 local president: Player? = nil
 
-local function sortPlayers(list: { Player }): { Player }
-	table.sort(list, function(a, b)
-		return a.UserId < b.UserId
-	end)
-	return list
-end
-
 function TeamService.reset()
 	table.clear(assignments)
 	president = nil
 end
 
-function TeamService.assignForRound(players: { Player })
+--- Assign sides/roles for the current MatchService round index.
+function TeamService.assignForRound(_players: { Player })
 	TeamService.reset()
-	local sorted = sortPlayers(table.clone(players))
 
-	-- Alternate into Good / Terrorist seats: seats 1..5 good (1=President), 6..10 terrorist.
-	for index, player in sorted do
-		if index <= 5 then
-			local role = if index == 1 then Enums.Role.President else Enums.Role.Bodyguard
-			assignments[player] = {
-				side = Enums.Side.Good,
-				role = role,
-			}
-			if role == Enums.Role.President then
-				president = player
+	local function seat(teamId: MatchService.TeamId)
+		local side = MatchService.getSideForTeam(teamId)
+		local members = MatchService.getTeamPlayers(teamId)
+		for _, player in members do
+			if side == Enums.Side.Good then
+				assignments[player] = {
+					side = Enums.Side.Good,
+					role = Enums.Role.Bodyguard, -- President overwritten below
+					teamId = teamId,
+				}
+			else
+				assignments[player] = {
+					side = Enums.Side.Terrorist,
+					role = Enums.Role.Terrorist,
+					teamId = teamId,
+				}
 			end
-		else
-			assignments[player] = {
-				side = Enums.Side.Terrorist,
-				role = Enums.Role.Terrorist,
-			}
 		end
 	end
 
-	-- With only 2 players: P1 President (Good), P2 Terrorist.
-	-- With 3+: fill bodyguards before overflowing to terrorists (already handled by index).
+	seat("A")
+	seat("B")
+
+	local goodPlayers = TeamService.getPlayersOnSide(Enums.Side.Good)
+	local chosen = MatchService.pickPresident(goodPlayers)
+	if chosen then
+		local existing = assignments[chosen]
+		if existing then
+			existing.role = Enums.Role.President
+			president = chosen
+		end
+	end
 end
 
 function TeamService.getAssignment(player: Player): Assignment
@@ -60,6 +74,7 @@ function TeamService.getAssignment(player: Player): Assignment
 		or {
 			side = Enums.Side.Spectator,
 			role = Enums.Role.Unassigned,
+			teamId = nil,
 		}
 end
 
@@ -113,13 +128,5 @@ function TeamService.clearPlayer(player: Player)
 	end
 	assignments[player] = nil
 end
-
-Players.PlayerRemoving:Connect(function(player)
-	-- RoundService / ObjectiveService observe disconnect; we only clear after round handles it.
-	-- Keep assignment until RoundService calls clear/reset.
-	if not player then
-		return
-	end
-end)
 
 return TeamService

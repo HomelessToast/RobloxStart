@@ -4,11 +4,15 @@
 local GameConfig = {
 	GameName = "VIP",
 
-	-- Match / round (slice 0: endless rounds, no bo7 / side swap yet)
+	-- Match / round — best of 7 (first to 4), sides alternate every round (§8.2)
 	MinPlayersToStart = 2,
 	MaxPlayersPerLobbyZone = 10, -- day and night ready pads each cap at 10 (5v5)
 	LobbyCountdownSeconds = 5,
 	RoundEndSeconds = 7,
+	IntermissionSeconds = 10, -- lobby pad + side-swap announce between rounds
+	MatchEndSeconds = 20, -- final scoreboard, then clear scores → lobby queue
+	MatchWinsNeeded = 4, -- first to 4
+	MaxRoundsInMatch = 7,
 	RoundDurationSeconds = 300,
 	CaptureDurationSeconds = 30,
 	-- Last viable entry is strictly before this remaining time (t=270 → 30s left).

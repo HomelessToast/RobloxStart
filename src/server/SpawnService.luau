@@ -26,6 +26,25 @@ function SpawnService.teleportToLobby(player: Player)
 	character:SetAttribute("Role", Enums.Role.Unassigned)
 end
 
+--- Return to the Day/Night pad that armed this match (fallback: lobby spawn).
+function SpawnService.teleportToReadyPad(player: Player, mode: LobbyService.LobbyMode?)
+	local character = player.Character
+	if not character then
+		return
+	end
+	local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not root then
+		return
+	end
+	if mode == "Day" or mode == "Night" then
+		root.CFrame = LobbyService.getReadyPadCFrame(mode)
+	else
+		root.CFrame = LobbyService.getSpawnCFrame()
+	end
+	character:SetAttribute("Side", Enums.Side.Spectator)
+	character:SetAttribute("Role", Enums.Role.Unassigned)
+end
+
 function SpawnService.teleportToSideSpawn(player: Player)
 	local character = player.Character
 	if not character then
