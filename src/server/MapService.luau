@@ -140,12 +140,13 @@ local function billboard(parent: BasePart, text: string, offsetY: number?)
 	label.Parent = gui
 end
 
+-- Team spawn pads: MapAnchor Id/Role stay for MapValidator + SpawnService.
+-- No player-visible BillboardGui / TextLabel naming the spawn (Motorcade/Market).
 local function spawnMarker(
 	parent: Folder,
 	name: string,
 	position: Vector3,
 	color: Color3,
-	label: string,
 	role: string
 )
 	local floorY = MapMetrics.FloorY
@@ -158,7 +159,6 @@ local function spawnMarker(
 		Enum.Material.Neon,
 		false
 	)
-	billboard(p, label, 7)
 	tagAnchor(p, name, role, nil)
 	return p
 end
@@ -2124,8 +2124,8 @@ function MapService.build()
 	safeHouse(folder, Enums.SafeHouseId.A, a, "CONSULATE")
 	safeHouse(folder, Enums.SafeHouseId.B, b, "PRECINCT")
 
-	spawnMarker(folder, "Motorcade", good, COLOR.good, "MOTORCADE (Good)", "GoodSpawn")
-	spawnMarker(folder, "Market", terror, COLOR.terror, "MARKET (Terrorists)", "TerrorSpawn")
+	spawnMarker(folder, "Motorcade", good, COLOR.good, "GoodSpawn")
+	spawnMarker(folder, "Market", terror, COLOR.terror, "TerrorSpawn")
 
 	local pathsFolder = Instance.new("Folder")
 	pathsFolder.Name = "Paths"
