@@ -20,6 +20,7 @@ Market / Consulate / Precinct):
 | Round over → teleport to Day/Night lobby pad; match over → clear scores → lobby queue | Yes |
 | Best of 7 (first to 4), sides alternate every round, HUD score + swap announce | Yes |
 | President: solo Good → that player; else rotate by UserId within the Good team | Yes |
+| Role skins: President black suit, bodyguard agent suit, terrorist woodland camo | Yes |
 | Friendly fire off; server-authoritative hits; no weapon pickups | Yes |
 | BUY phase (30s) + picture buy menu; US/RU arsenals; armor; tracers; health bars; 2× headshots | Yes |
 | HUD: round timer, score, cash, armor, objective banner, capture bar | Yes |

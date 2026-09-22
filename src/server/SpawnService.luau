@@ -7,6 +7,7 @@ local Enums = require(ReplicatedStorage.Shared.Enums)
 local MapService = require(script.Parent.MapService)
 local LobbyService = require(script.Parent.LobbyService)
 local TeamService = require(script.Parent.TeamService)
+local AppearanceService = require(script.Parent.AppearanceService)
 
 local SpawnService = {}
 
@@ -24,6 +25,7 @@ function SpawnService.teleportToLobby(player: Player)
 	root.CFrame = LobbyService.getSpawnCFrame()
 	character:SetAttribute("Side", Enums.Side.Spectator)
 	character:SetAttribute("Role", Enums.Role.Unassigned)
+	AppearanceService.restoreAvatar(player)
 end
 
 --- Return to the Day/Night pad that armed this match (fallback: lobby spawn).
@@ -43,6 +45,7 @@ function SpawnService.teleportToReadyPad(player: Player, mode: LobbyService.Lobb
 	end
 	character:SetAttribute("Side", Enums.Side.Spectator)
 	character:SetAttribute("Role", Enums.Role.Unassigned)
+	AppearanceService.restoreAvatar(player)
 end
 
 function SpawnService.teleportToSideSpawn(player: Player)
@@ -76,8 +79,12 @@ function SpawnService.prepareCharacter(player: Player)
 	humanoid.WalkSpeed = GameConfig.WalkSpeed
 
 	-- Tag for combat / HUD
+	local role = TeamService.getRole(player)
 	character:SetAttribute("Side", TeamService.getSide(player))
-	character:SetAttribute("Role", TeamService.getRole(player))
+	character:SetAttribute("Role", role)
+
+	-- Role kit before loadout welds (AppearanceService yields on ApplyDescription).
+	AppearanceService.applyRole(player, role)
 
 	SpawnService.teleportToSideSpawn(player)
 end
