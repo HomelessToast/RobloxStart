@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SoundService = game:GetService("SoundService")
 local Workspace = game:GetService("Workspace")
 
+local GameConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("GameConfig"))
 local Net = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Net"))
 local Enums = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Enums"))
 
@@ -63,21 +64,63 @@ local objectiveLabel = makeLabel(
 objectiveLabel.TextXAlignment = Enum.TextXAlignment.Center
 objectiveLabel.Font = Enum.Font.GothamMedium
 
-local roleLabel = makeLabel("Role", UDim2.new(0, 20, 1, -148), UDim2.fromOffset(360, 28), 18)
-local cashLabel = makeLabel("Cash", UDim2.new(0, 20, 1, -120), UDim2.fromOffset(220, 24), 16)
+local roleLabel = makeLabel("Role", UDim2.new(0, 20, 1, -188), UDim2.fromOffset(360, 28), 18)
+local cashLabel = makeLabel("Cash", UDim2.new(0, 20, 1, -160), UDim2.fromOffset(220, 24), 16)
 cashLabel.TextColor3 = Color3.fromRGB(120, 220, 140)
-local armorLabel = makeLabel("Armor", UDim2.new(0, 20, 1, -96), UDim2.fromOffset(280, 24), 16)
+local armorLabel = makeLabel("Armor", UDim2.new(0, 20, 1, -136), UDim2.fromOffset(280, 24), 16)
 armorLabel.TextColor3 = Color3.fromRGB(140, 180, 255)
 local ammoLabel =
 	makeLabel("Ammo", UDim2.new(1, -20, 1, -120), UDim2.fromOffset(220, 28), 20, Vector2.new(1, 0))
 ammoLabel.TextXAlignment = Enum.TextXAlignment.Right
 
-local dodgeLabel =
-	makeLabel("Dodge", UDim2.new(1, -20, 1, -148), UDim2.fromOffset(220, 22), 14, Vector2.new(1, 0))
-dodgeLabel.TextXAlignment = Enum.TextXAlignment.Right
-dodgeLabel.Font = Enum.Font.GothamMedium
+-- Dodge cooldown — bottom-left (bar + numeric remaining). Server owns CD via MovementState.
+local dodgePanel = Instance.new("Frame")
+dodgePanel.Name = "DodgeCooldown"
+dodgePanel.AnchorPoint = Vector2.new(0, 1)
+dodgePanel.Position = UDim2.new(0, 20, 1, -72)
+dodgePanel.Size = UDim2.fromOffset(200, 40)
+dodgePanel.BackgroundTransparency = 1
+dodgePanel.Parent = screenGui
+
+local dodgeLabel = Instance.new("TextLabel")
+dodgeLabel.Name = "Label"
+dodgeLabel.BackgroundTransparency = 1
+dodgeLabel.Position = UDim2.fromOffset(0, 0)
+dodgeLabel.Size = UDim2.new(1, 0, 0, 18)
+dodgeLabel.Font = Enum.Font.GothamBold
+dodgeLabel.TextSize = 14
 dodgeLabel.TextColor3 = Color3.fromRGB(180, 200, 220)
-dodgeLabel.Text = "Q Dodge ready"
+dodgeLabel.TextStrokeTransparency = 0.4
+dodgeLabel.TextXAlignment = Enum.TextXAlignment.Left
+dodgeLabel.TextYAlignment = Enum.TextYAlignment.Center
+dodgeLabel.Text = "DODGE  Q  ready"
+dodgeLabel.Parent = dodgePanel
+
+local dodgeBarBg = Instance.new("Frame")
+dodgeBarBg.Name = "BarBg"
+dodgeBarBg.Position = UDim2.fromOffset(0, 22)
+dodgeBarBg.Size = UDim2.new(1, 0, 0, 10)
+dodgeBarBg.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
+dodgeBarBg.BorderSizePixel = 0
+dodgeBarBg.Parent = dodgePanel
+
+local dodgeBarBgCorner = Instance.new("UICorner")
+dodgeBarBgCorner.CornerRadius = UDim.new(0, 4)
+dodgeBarBgCorner.Parent = dodgeBarBg
+
+local dodgeBarFill = Instance.new("Frame")
+dodgeBarFill.Name = "Fill"
+dodgeBarFill.Size = UDim2.fromScale(1, 1)
+dodgeBarFill.BackgroundColor3 = Color3.fromRGB(100, 190, 255)
+dodgeBarFill.BorderSizePixel = 0
+dodgeBarFill.Parent = dodgeBarBg
+
+local dodgeBarFillCorner = Instance.new("UICorner")
+dodgeBarFillCorner.CornerRadius = UDim.new(0, 4)
+dodgeBarFillCorner.Parent = dodgeBarFill
+
+-- Cooldown duration from GameConfig for bar ratio (server sends remaining seconds).
+local DODGE_COOLDOWN_SECONDS = GameConfig.Dodge.CooldownSeconds
 
 -- Sprint stamina bar (bottom-center)
 local staminaBg = Instance.new("Frame")
@@ -399,14 +442,22 @@ remotes:WaitForChild(Net.MovementState).OnClientEvent:Connect(function(payload)
 
 	local cd = payload.dodgeCooldownRemaining or 0
 	if payload.dodging then
-		dodgeLabel.Text = "Q Dodge…"
+		dodgeLabel.Text = "DODGE  rolling…"
 		dodgeLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+		dodgeBarFill.Size = UDim2.fromScale(1, 1)
+		dodgeBarFill.BackgroundColor3 = Color3.fromRGB(255, 200, 100)
 	elseif cd > 0.05 then
-		dodgeLabel.Text = string.format("Q Dodge %.0fs", math.ceil(cd))
+		-- Show one-decimal remaining so the bottom-left CD is readable mid-count.
+		dodgeLabel.Text = string.format("DODGE  Q  %.1fs", cd)
 		dodgeLabel.TextColor3 = Color3.fromRGB(150, 160, 175)
+		local cdRatio = math.clamp(1 - (cd / DODGE_COOLDOWN_SECONDS), 0, 1)
+		dodgeBarFill.Size = UDim2.fromScale(cdRatio, 1)
+		dodgeBarFill.BackgroundColor3 = Color3.fromRGB(120, 150, 190)
 	else
-		dodgeLabel.Text = "Q Dodge ready"
+		dodgeLabel.Text = "DODGE  Q  ready"
 		dodgeLabel.TextColor3 = Color3.fromRGB(180, 200, 220)
+		dodgeBarFill.Size = UDim2.fromScale(1, 1)
+		dodgeBarFill.BackgroundColor3 = Color3.fromRGB(100, 190, 255)
 	end
 end)
 

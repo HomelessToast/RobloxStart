@@ -117,21 +117,26 @@ local GameConfig = {
 	WalkSpeed = 16,
 
 	-- Sprint stamina — every character. Server-owned; client sends intent.
+	-- Client plays RunAnimation* while MovementState.sprinting + moving.
 	Sprint = {
 		MaxStamina = 100,
 		DrainPerSecond = 16, -- ~6.25s continuous sprint
 		RegenPerSecond = 14, -- ~7.1s empty → full
 		RegenDelaySeconds = 0.4, -- pause after releasing sprint before regen
 		MinStaminaToStart = 8, -- cannot start a sprint below this
+		-- Official Roblox Animate run clips (Movement priority overlay).
+		RunAnimationR15 = "rbxassetid://507767714",
+		RunAnimationR6 = "rbxassetid://180426354",
+		RunAnimSpeed = 1.2, -- slightly snappier than default run
 	},
 
 	-- Dodge / roll (Q) — unified for all characters (was President-only in design §5.3).
-	-- Same displacement / cooldown for everyone; see docs/vip-movement.md.
+	-- Forward somersault along locked MoveDirection/facing; see docs/vip-movement.md.
 	Dodge = {
 		Distance = 55, -- studs horizontal (covers §7.5 open-ground gaps ≤60)
-		Duration = 0.4, -- seconds of forced travel
+		Duration = 0.4, -- seconds of forced travel + one full forward pitch roll
 		RecoverySeconds = 0.3, -- cannot fire until recovery ends
-		CooldownSeconds = 30,
+		CooldownSeconds = 30, -- starts on activation; HUD bottom-left shows remaining
 		GroundRayLength = 4, -- must be near ground to roll
 	},
 
