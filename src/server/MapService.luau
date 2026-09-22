@@ -342,7 +342,8 @@ local function vantageBuilding(
 	folder.Name = name
 	folder.Parent = parent
 
-	local floorH = 14
+	-- Tall enough to match surrounding canyons; rooftop stays isolated (no neighbor bridge).
+	local floorH = 16
 	local totalH = floors * floorH
 	local floorY = MapMetrics.FloorY
 
@@ -355,11 +356,11 @@ local function vantageBuilding(
 		Enum.Material.Brick
 	)
 
-	-- Gapped rooftop deck (not a continuous roof highway)
+	-- Gapped rooftop deck (firing position only — not a rotate highway)
 	part(
 		folder,
 		"Rooftop",
-		Vector3.new(footprint.X - 6, 1, footprint.Z - 6),
+		Vector3.new(footprint.X - 8, 1, footprint.Z - 8),
 		CFrame.new(base.X, floorY + totalH + 0.5, base.Z),
 		COLOR.metal,
 		Enum.Material.Metal
@@ -374,7 +375,6 @@ local function vantageBuilding(
 		floorH
 	)
 
-	-- Window angle marker (non-colliding, readable)
 	local win = part(
 		folder,
 		"WindowAngle",
@@ -391,26 +391,27 @@ local function vantageBuilding(
 	win.Transparency = 0.35
 	win:SetAttribute("Vantage", true)
 
-	-- Second-floor balcony ledge (elevated vantage Part)
 	part(
 		folder,
 		"Balcony",
-		Vector3.new(footprint.X * 0.6, 1, 6),
+		Vector3.new(footprint.X * 0.55, 1, 5),
 		CFrame.new(
-			base.X + windowFacing.X * (footprint.X / 2 + 3),
+			base.X + windowFacing.X * (footprint.X / 2 + 2.5),
 			floorY + floorH + 0.5,
-			base.Z + windowFacing.Z * 4
+			base.Z + windowFacing.Z * 3
 		),
 		COLOR.concrete
 	)
 end
 
 --[[
-	Dense city grid + CS2/Valorant lane philosophy:
-	- Fill the footprint with building blocks; carve only named street/alley corridors.
-	- Few meaningful routes Motorcade → mid → each house (not open-field plazas).
-	- Every choke has a bypass that is longer/narrower (costly), never a free highway.
-	- Rooftops stay gapped (vantage buildings elsewhere); no continuous roof rotate.
+	Dense city grid matching Matthew's references:
+	- Right-side parcel model: small varied plots, tight streets, frequent corners
+	- Every non-street parcel filled with TALL towers (street canyons) — no flat pads,
+	  no gaps between adjacent buildings you can slip through
+	- Sightlines die at corners; no long peeks over low roofs across the map
+	- Only carved tactical corridors + costly alleys are walkable (CS/Valorant lanes)
+	- Path ribbons in MapMetrics stay the distance source of truth
 ]]
 
 local function distPointToSegment2D(
@@ -464,7 +465,95 @@ local function streetCover(parent: Folder, x: number, z: number, name: string, y
 	if yaw then
 		cf *= CFrame.Angles(0, yaw, 0)
 	end
-	part(parent, name, Vector3.new(10, 5, 3.5), cf, COLOR.cover)
+	part(parent, name, Vector3.new(8, 5, 3), cf, COLOR.cover)
+end
+
+-- Stable height hash so rebuilds match (studs). Tall canyons block roof peeks.
+local function parcelHeight(x: number, z: number): number
+	local h = math.abs(math.floor(x * 0.17) + math.floor(z * 0.31) * 7)
+	-- 52–100 stud towers (≈4–7 floors at 14 studs)
+	return 52 + (h % 7) * 8
+end
+
+local function stampTallParcel(
+	parent: Folder,
+	namePrefix: string,
+	cx: number,
+	cz: number,
+	footX: number,
+	footZ: number,
+	floorY: number
+)
+	local h = parcelHeight(cx, cz)
+	local style = (math.abs(math.floor(cx) + math.floor(cz)) % 5)
+	local color = if style <= 1
+		then COLOR.brick
+		elseif style == 2 then COLOR.metal
+		else COLOR.concrete
+	local mat = if style <= 1
+		then Enum.Material.Brick
+		elseif style == 2 then Enum.Material.Metal
+		else Enum.Material.Concrete
+
+	-- Varied massing inside the parcel (right-ref small blocks) but ZERO walkable gaps:
+	-- sub-towers always abut and still fill the full footprint.
+	if style == 0 and footX >= 28 and footZ >= 28 then
+		-- Twin towers split on X, flush to parcel edges
+		local half = footX * 0.5
+		local h2 = h - 8
+		part(
+			parent,
+			namePrefix .. "_A",
+			Vector3.new(half, h, footZ),
+			CFrame.new(cx - half * 0.5, floorY + h / 2, cz),
+			color,
+			mat
+		)
+		part(
+			parent,
+			namePrefix .. "_B",
+			Vector3.new(half, h2, footZ),
+			CFrame.new(cx + half * 0.5, floorY + h2 / 2, cz),
+			COLOR.concrete,
+			Enum.Material.Concrete
+		)
+	elseif style == 3 and footX >= 28 and footZ >= 28 then
+		-- L-mass: full-height main + shorter wing (still fills XY)
+		part(
+			parent,
+			namePrefix .. "_Main",
+			Vector3.new(footX, h, footZ * 0.55),
+			CFrame.new(cx, floorY + h / 2, cz - footZ * 0.225),
+			color,
+			mat
+		)
+		part(
+			parent,
+			namePrefix .. "_Wing",
+			Vector3.new(footX * 0.55, h - 12, footZ * 0.45),
+			CFrame.new(cx - footX * 0.225, floorY + (h - 12) / 2, cz + footZ * 0.275),
+			COLOR.brick,
+			Enum.Material.Brick
+		)
+		-- Fill remaining corner so you cannot walk through the L gap
+		part(
+			parent,
+			namePrefix .. "_Fill",
+			Vector3.new(footX * 0.45, h - 20, footZ * 0.45),
+			CFrame.new(cx + footX * 0.275, floorY + (h - 20) / 2, cz + footZ * 0.275),
+			COLOR.wall
+		)
+	else
+		-- Solid tower filling the whole parcel
+		part(
+			parent,
+			namePrefix,
+			Vector3.new(footX, h, footZ),
+			CFrame.new(cx, floorY + h / 2, cz),
+			color,
+			mat
+		)
+	end
 end
 
 local function buildUrbanMassing(parent: Folder)
@@ -481,14 +570,13 @@ local function buildUrbanMassing(parent: Folder)
 	lanesFolder.Name = "LanesAndChokes"
 	lanesFolder.Parent = massing
 
-	-- Primary tactical lanes (half-widths). Path ribbons stay the measurement source;
-	-- these corridors are the playable carve so free plaza crossing is gone.
+	-- Tight street half-widths (right-ref road network feel; smokeable pinches).
 	local laneHalf = {
-		primary = 13, -- ~26 stud street (smokeable choke width)
-		approach = 12,
-		arterial = 14, -- southern A↔B boulevard
-		alley = 7, -- costly bypass (~14 studs)
-		crossover = 10,
+		primary = 11, -- ~22 stud center avenue
+		approach = 10,
+		arterial = 12, -- southern A↔B boulevard
+		alley = 6, -- costly bypass (~12 studs)
+		crossover = 8,
 	}
 
 	local paths = MapMetrics.Paths
@@ -499,7 +587,7 @@ local function buildUrbanMassing(parent: Folder)
 	local aToB = paths.A_to_B.points
 	local midLane = paths.Good_to_Terror.points
 
-	-- Extra orthogonal connectors / costly alleys (not primary measurement ribbons).
+	-- Costly alley bypasses + limited crossovers (not free highways).
 	local westBypass = {
 		Vector3.new(-220, 0, -480),
 		Vector3.new(-220, 0, -300),
@@ -515,32 +603,31 @@ local function buildUrbanMassing(parent: Folder)
 		Vector3.new(340, 0, -20),
 	}
 	local earlyCrossover = {
-		Vector3.new(-120, 0, -380),
+		Vector3.new(-100, 0, -380),
 		Vector3.new(0, 0, -380),
-		Vector3.new(120, 0, -380),
+		Vector3.new(100, 0, -380),
 	}
 	local lateCrossover = {
-		Vector3.new(-160, 0, -160),
+		Vector3.new(-140, 0, -160),
 		Vector3.new(0, 0, -160),
-		Vector3.new(160, 0, -160),
+		Vector3.new(140, 0, -160),
 	}
-	-- Northern pocket link (Market → house approaches without open field)
 	local northLink = {
-		Vector3.new(-200, 0, 100),
+		Vector3.new(-180, 0, 100),
 		Vector3.new(0, 0, 100),
-		Vector3.new(200, 0, 100),
+		Vector3.new(180, 0, 100),
 	}
 
+	-- Spawn / objective yards only — NOT large empty plazas.
 	local clearPads = {
-		{ x = 0, z = -500, hw = 28, hd = 28 }, -- Motorcade
-		{ x = 0, z = -50, hw = 30, hd = 30 }, -- Market
-		{ x = -385, z = 0, hw = 48, hd = 42 }, -- Consulate yard
-		{ x = 385, z = 0, hw = 48, hd = 42 }, -- Precinct yard
-		-- Vantage footprints (buildings placed after massing)
-		{ x = -150, z = -260, hw = 28, hd = 26 },
-		{ x = 150, z = -260, hw = 28, hd = 26 },
-		{ x = -280, z = -120, hw = 26, hd = 28 },
-		{ x = 280, z = -120, hw = 26, hd = 28 },
+		{ x = 0, z = -500, hw = 22, hd = 22 }, -- Motorcade
+		{ x = 0, z = -50, hw = 24, hd = 24 }, -- Market
+		{ x = -385, z = 0, hw = 44, hd = 38 }, -- Consulate yard
+		{ x = 385, z = 0, hw = 44, hd = 38 }, -- Precinct yard
+		{ x = -150, z = -260, hw = 22, hd = 20 }, -- vantages
+		{ x = 150, z = -260, hw = 22, hd = 20 },
+		{ x = -280, z = -120, hw = 20, hd = 22 },
+		{ x = 280, z = -120, hw = 20, hd = 22 },
 	}
 
 	local function isPlayableCorridor(px: number, pz: number): boolean
@@ -585,110 +672,82 @@ local function buildUrbanMassing(parent: Folder)
 		return false
 	end
 
-	-- Stamp dense blocks across the footprint; only carved corridors stay open.
-	local pitch = 52
-	local blockSize = 40
+	-- Right-ref parcel grid: small cells, buildings flush (no interstitial alleys).
+	-- pitch == footprint so adjacent towers share edges; only corridor cells stay open.
+	local pitch = 32
 	local idx = 0
-	for x = -400, 400, pitch do
-		for z = -500, 160, pitch do
-			if not isPlayableCorridor(x, z) then
-				idx += 1
-				-- Pseudo-random height from position (stable across rebuilds)
-				local h = 16 + ((math.abs(x) + math.abs(z) * 3) % 5) * 4
-				local brickish = ((x + z) % (pitch * 2)) == 0
+	local streetIdx = 0
+	for x = -416, 416, pitch do
+		for z = -512, 160, pitch do
+			local cx = x + pitch * 0.5
+			local cz = z + pitch * 0.5
+			if isPlayableCorridor(cx, cz) then
+				streetIdx += 1
+				-- Thin asphalt deck on playable streets (visual road network)
 				part(
-					blocksFolder,
-					"Block_" .. idx,
-					Vector3.new(blockSize, h, blockSize),
-					CFrame.new(x, floorY + h / 2, z),
-					if brickish then COLOR.brick else COLOR.concrete,
-					if brickish then Enum.Material.Brick else Enum.Material.Concrete
+					lanesFolder,
+					"Street_" .. streetIdx,
+					Vector3.new(pitch - 2, 0.35, pitch - 2),
+					CFrame.new(cx, floorY + 0.2, cz),
+					COLOR.asphalt,
+					Enum.Material.Asphalt,
+					false
 				)
-				-- Corner interior / cover nook on street-facing edges (every other block)
-				if idx % 2 == 0 then
-					local nookX = x + (if x < 0 then blockSize / 2 + 4 else -(blockSize / 2 + 4))
-					local nookZ = z
-					if isPlayableCorridor(nookX, nookZ) then
-						part(
-							blocksFolder,
-							"CornerCover_" .. idx,
-							Vector3.new(8, 6, 8),
-							CFrame.new(nookX, floorY + 3, nookZ),
-							COLOR.cover
-						)
-					end
-				end
+			else
+				idx += 1
+				stampTallParcel(blocksFolder, "Tower_" .. idx, cx, cz, pitch, pitch, floorY)
 			end
 		end
 	end
 
-	-- Mid hub side masses: pinch Market into a lane (leave center avenue open).
-	part(
-		lanesFolder,
-		"MarketHubN",
-		Vector3.new(70, 22, 36),
-		CFrame.new(0, floorY + 11, 40),
-		COLOR.brick,
-		Enum.Material.Brick
-	)
-	part(
-		lanesFolder,
-		"MarketHubSW",
-		Vector3.new(36, 18, 40),
-		CFrame.new(-42, floorY + 9, -110),
-		COLOR.concrete
-	)
-	part(
-		lanesFolder,
-		"MarketHubSE",
-		Vector3.new(36, 18, 40),
-		CFrame.new(42, floorY + 9, -110),
-		COLOR.concrete
-	)
+	-- Mid pinch towers: Market is a crossing, not an open field (leave avenue open).
+	stampTallParcel(blocksFolder, "MarketPinchN", 0, 36, 64, 28, floorY)
+	stampTallParcel(blocksFolder, "MarketPinchSW", -40, -108, 28, 36, floorY)
+	stampTallParcel(blocksFolder, "MarketPinchSE", 40, -108, 28, 36, floorY)
 
-	-- Center canal choke (~24 stud opening) on Motorcade→Market lane
+	-- Center canal choke (~22 stud opening) on Motorcade→Market lane
 	part(
 		lanesFolder,
 		"CanalBridgeChokeL",
-		Vector3.new(36, 16, 26),
-		CFrame.new(-30, floorY + 8, -300),
+		Vector3.new(34, 28, 24),
+		CFrame.new(-28, floorY + 14, -300),
 		COLOR.choke
 	)
 	part(
 		lanesFolder,
 		"CanalBridgeChokeR",
-		Vector3.new(36, 16, 26),
-		CFrame.new(30, floorY + 8, -300),
+		Vector3.new(34, 28, 24),
+		CFrame.new(28, floorY + 14, -300),
 		COLOR.choke
 	)
 	part(
 		lanesFolder,
 		"CanalDeck",
-		Vector3.new(24, 1, 32),
+		Vector3.new(22, 1, 28),
 		CFrame.new(0, floorY + 0.5, -300),
 		COLOR.asphalt,
 		Enum.Material.Asphalt
 	)
 
-	-- West approach choke (~26 stud gap on Good→Consulate lane) + longer western alley bypass
+	-- West approach choke + longer/narrower western alley bypass
 	part(
 		lanesFolder,
 		"WestLaneChokeL",
-		Vector3.new(28, 18, 22),
-		CFrame.new(-212, floorY + 9, -265),
+		Vector3.new(26, 30, 20),
+		CFrame.new(-210, floorY + 15, -265),
 		COLOR.choke
 	)
 	part(
 		lanesFolder,
 		"WestLaneChokeR",
-		Vector3.new(28, 18, 22),
-		CFrame.new(-158, floorY + 9, -265),
+		Vector3.new(26, 30, 20),
+		CFrame.new(-160, floorY + 15, -265),
 		COLOR.choke
 	)
 	part(
 		lanesFolder,
 		"WestBypassGapMarker",
-		Vector3.new(12, 0.3, 70),
+		Vector3.new(10, 0.3, 64),
 		CFrame.new(-220, floorY + 0.2, -265),
 		COLOR.path,
 		Enum.Material.Neon,
@@ -699,85 +758,71 @@ local function buildUrbanMassing(parent: Folder)
 	part(
 		lanesFolder,
 		"EastLaneChokeL",
-		Vector3.new(28, 18, 22),
-		CFrame.new(158, floorY + 9, -265),
+		Vector3.new(26, 30, 20),
+		CFrame.new(160, floorY + 15, -265),
 		COLOR.choke
 	)
 	part(
 		lanesFolder,
 		"EastLaneChokeR",
-		Vector3.new(28, 18, 22),
-		CFrame.new(212, floorY + 9, -265),
+		Vector3.new(26, 30, 20),
+		CFrame.new(210, floorY + 15, -265),
 		COLOR.choke
 	)
 	part(
 		lanesFolder,
 		"EastBypassGapMarker",
-		Vector3.new(12, 0.3, 70),
+		Vector3.new(10, 0.3, 64),
 		CFrame.new(220, floorY + 0.2, -265),
 		COLOR.path,
 		Enum.Material.Neon,
 		false
 	)
 
-	-- Southern arterial pinch points on Consulate↔Precinct boulevard (away from canal mid)
+	-- Southern arterial pinches (A↔B) — tall so they also cut roof peeks
 	part(
 		lanesFolder,
 		"SouthBlvdChokeW",
-		Vector3.new(36, 14, 24),
-		CFrame.new(-200, floorY + 7, -250),
+		Vector3.new(32, 36, 22),
+		CFrame.new(-200, floorY + 18, -250),
 		COLOR.choke
 	)
 	part(
 		lanesFolder,
 		"SouthBlvdChokeE",
-		Vector3.new(36, 14, 24),
-		CFrame.new(200, floorY + 7, -250),
+		Vector3.new(32, 36, 22),
+		CFrame.new(200, floorY + 18, -250),
 		COLOR.choke
 	)
 
-	-- Decision wedges (~200–250 from each house): commit past these costs a long rotate
-	part(
-		lanesFolder,
-		"DecisionA",
-		Vector3.new(32, 14, 32),
-		CFrame.new(-210, floorY + 7, -50),
-		COLOR.wood,
-		Enum.Material.Wood
-	)
-	part(
-		lanesFolder,
-		"DecisionB",
-		Vector3.new(32, 14, 32),
-		CFrame.new(210, floorY + 7, -50),
-		COLOR.wood,
-		Enum.Material.Wood
-	)
+	-- Decision masses (~200–250 from each house): tall blocks, not low wood pads
+	stampTallParcel(blocksFolder, "DecisionA", -210, -50, 30, 30, floorY)
+	stampTallParcel(blocksFolder, "DecisionB", 210, -50, 30, 30, floorY)
 
-	-- Overhead arcade on primary center route (required §7.5 cover from above)
+	-- Overhead arcade on primary center route (§7.5)
 	for i = -3, 3 do
 		part(
 			lanesFolder,
 			"ArcadePillar" .. i,
 			Vector3.new(3, 14, 3),
-			CFrame.new(i * 14, floorY + 7, -340),
+			CFrame.new(i * 12, floorY + 7, -340),
 			COLOR.concrete
 		)
 	end
 	part(
 		lanesFolder,
 		"ArcadeRoof",
-		Vector3.new(100, 2, 26),
+		Vector3.new(88, 2, 22),
 		CFrame.new(0, floorY + 15, -340),
 		COLOR.metal,
 		Enum.Material.Metal
 	)
 
-	-- Street cover cadence along the three macro routes (≤60 stud open gaps)
+	-- Street cover on lanes (≤60 stud open gaps); sitting in the canyon, not on roofs
 	for i = 1, 8 do
 		local z = -480 + i * 50
-		streetCover(lanesFolder, -18, z, "MidCoverL" .. i)
-		streetCover(lanesFolder, 18, z, "MidCoverR" .. i)
+		streetCover(lanesFolder, -14, z, "MidCoverL" .. i)
+		streetCover(lanesFolder, 14, z, "MidCoverR" .. i)
 	end
 	for i = 1, 5 do
 		local t = i / 6
@@ -785,8 +830,8 @@ local function buildUrbanMassing(parent: Folder)
 		local az = goodToA[1].Z + (goodToA[#goodToA].Z - goodToA[1].Z) * t
 		local bx = goodToB[1].X + (goodToB[#goodToB].X - goodToB[1].X) * t
 		local bz = goodToB[1].Z + (goodToB[#goodToB].Z - goodToB[1].Z) * t
-		streetCover(lanesFolder, ax + 14, az, "WestLaneCover" .. i, 0.4)
-		streetCover(lanesFolder, bx - 14, bz, "EastLaneCover" .. i, -0.4)
+		streetCover(lanesFolder, ax + 12, az, "WestLaneCover" .. i, 0.4)
+		streetCover(lanesFolder, bx - 12, bz, "EastLaneCover" .. i, -0.4)
 	end
 end
 
@@ -796,12 +841,13 @@ local function buildVantages(parent: Folder)
 	folder.Parent = parent
 
 	-- Two rooftop + two window angles onto main routes; no dual-house oversights.
+	-- Floors raised so vantages match canyon height (no low-roof peek network).
 	vantageBuilding(
 		folder,
 		"VantageWestApproach",
 		Vector3.new(-150, 0, -260),
-		Vector3.new(36, 0, 32),
-		2,
+		Vector3.new(30, 0, 28),
+		4,
 		Vector3.new(1, 0, 0),
 		Vector3.new(-100, 0, -260)
 	)
@@ -809,8 +855,8 @@ local function buildVantages(parent: Folder)
 		folder,
 		"VantageEastApproach",
 		Vector3.new(150, 0, -260),
-		Vector3.new(36, 0, 32),
-		2,
+		Vector3.new(30, 0, 28),
+		4,
 		Vector3.new(-1, 0, 0),
 		Vector3.new(100, 0, -260)
 	)
@@ -818,8 +864,8 @@ local function buildVantages(parent: Folder)
 		folder,
 		"VantageNearConsulate",
 		Vector3.new(-280, 0, -120),
-		Vector3.new(34, 0, 36),
-		3,
+		Vector3.new(28, 0, 30),
+		5,
 		Vector3.new(0, 0, 1),
 		Vector3.new(-240, 0, -120)
 	)
@@ -827,8 +873,8 @@ local function buildVantages(parent: Folder)
 		folder,
 		"VantageNearPrecinct",
 		Vector3.new(280, 0, -120),
-		Vector3.new(34, 0, 36),
-		3,
+		Vector3.new(28, 0, 30),
+		5,
 		Vector3.new(0, 0, 1),
 		Vector3.new(240, 0, -120)
 	)

@@ -59,16 +59,15 @@ Consulate / Precinct.
 
 ### Layout philosophy (dense grid + tactical lanes)
 
-Metric distances above are unchanged. The greybox **massing** is a dense city
-grid: solid building blocks fill the footprint; only named street/alley corridors
-are carved open (path ribbons + costly bypass alleys + two crossovers).
+Metric distances above are unchanged. Massing follows Matthew’s city references:
 
-Think **city blocks × Inferno/Mirage lanes**, not open-field traversal:
-
-- Three macro routes Motorcade → houses (west / mid / east), pinched by smokeable chokes
-- Every choke has a **longer/narrower** alley bypass (neon markers) — expensive, not free
-- Market mid is a pinched hub, not a plaza you can freely cross
-- Elevations exist as gapped rooftop vantages; roofs are not a rotate highway
+- **Right-side parcel grid** — small ~32-stud plots, frequent corners, tight streets
+  (reject left-side huge empty plots / open fields)
+- **Every non-street parcel = tall tower** (≈52–100 studs) — street canyons that block
+  corner peeks and long roof sightlines; no flat grey pads
+- Buildings are **flush** (pitch = footprint) so you cannot slip between blocks
+- Only named tactical corridors + costly alley bypasses are walkable (CS/Valorant lanes)
+- Market mid is a pinched crossing; roofs stay isolated vantage decks, not a rotate layer
 
 Art is still colored Parts only — modular dress is deferred until these metrics
 pass playtest.
