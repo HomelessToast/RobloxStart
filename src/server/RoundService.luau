@@ -97,7 +97,7 @@ local function broadcastRound()
 		end
 	elseif state == Enums.RoundState.Buy then
 		banner = string.format(
-			"BUY PHASE — %ds · Score %s · B for shop",
+			"BUY PHASE — %ds · Score %s · X for shop",
 			math.max(0, math.ceil(timeRemaining)),
 			match.scoreLine
 		)
@@ -161,7 +161,7 @@ end
 	Clears hotbar/ammo/visuals and restores default avatar before lobby /
 	intermission. BUY re-grants via prepareBuyPlayers.
 ]]
-local function stripRoundGear(players: { Player }?)
+local function stripGearForLobby(players: { Player }?)
 	local list = players or Players:GetPlayers()
 	LoadoutService.clear()
 	WeaponService.reset()
@@ -184,7 +184,7 @@ end
 
 -- Yielding teleports run off Heartbeat so the round clock never stalls mid-step.
 local function teleportRosterToLobbyPad(mode: LobbyService.LobbyMode?)
-	stripRoundGear()
+	stripGearForLobby()
 	task.spawn(function()
 		for _, player in Players:GetPlayers() do
 			if not player.Character then
@@ -209,7 +209,7 @@ local function returnEveryoneToLobbySpawn()
 	pendingMode = nil
 	lobbyCountdown = 0
 	BuyService.setOpen(false)
-	stripRoundGear()
+	stripGearForLobby()
 	task.spawn(function()
 		for _, player in Players:GetPlayers() do
 			if not player.Character then
@@ -274,6 +274,7 @@ local function enterMatchEnd()
 	CombatService.setRoundLive(false)
 	BuyService.setOpen(false)
 	CaptureService.stopMonitoring()
+	stripGearForLobby()
 	timeRemaining = GameConfig.MatchEndSeconds
 
 	local match = MatchService.snapshot()
@@ -298,6 +299,7 @@ local function enterIntermission()
 	CombatService.setRoundLive(false)
 	CaptureService.stopMonitoring()
 	CaptureService.reset()
+	stripGearForLobby(MatchService.getRoster())
 	timeRemaining = GameConfig.IntermissionSeconds
 
 	-- Advance round index now so HUD / side mapping show the *upcoming* round.
@@ -333,7 +335,7 @@ local function enterRoundEnd(resolution: ObjectiveService.Resolution)
 	CaptureService.stopMonitoring()
 	unfreezeRoster()
 	-- Strip guns/skins immediately so they don't linger into lobby pad time.
-	stripRoundGear(MatchService.getRoster())
+	stripGearForLobby(MatchService.getRoster())
 	timeRemaining = GameConfig.RoundEndSeconds
 	lastResolution = resolution
 

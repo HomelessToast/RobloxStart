@@ -106,8 +106,7 @@ hint.Font = Enum.Font.GothamMedium
 hint.TextSize = 13
 hint.TextColor3 = Color3.fromRGB(160, 168, 185)
 hint.TextXAlignment = Enum.TextXAlignment.Left
-hint.Text =
-	"Click a card to buy · X toggles menu · multiple guns go to hotbar (1–5) · President pistol-only"
+hint.Text = "X toggles menu · buy multiple guns into hotbar · R reloads"
 hint.Parent = panel
 
 local scroll = Instance.new("ScrollingFrame")
@@ -385,12 +384,6 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		if menuVisible then
 			rebuild()
 		end
-	end
-end)
-
-closeBtn.MouseButton1Click:Connect(function()
-	if buyOpen then
-		setMenuVisible(false)
 	end
 end)
 
