@@ -1,0 +1,26 @@
+# Built places and models produced by `rojo build`
+*.rbxl
+*.rbxlx
+*.rbxm
+*.rbxmx
+*.rbxl.lock
+*.rbxlx.lock
+
+# Rojo
+/build/
+sourcemap.json
+
+# Wally (when packages are added later)
+/Packages/
+/ServerPackages/
+/DevPackages/
+
+# Selene's generated Roblox standard library
+roblox.toml
+roblox.yml
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
