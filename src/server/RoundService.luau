@@ -528,28 +528,42 @@ local function startDebugSoloFromLobby(players: { Player })
 	local modeRaw = GameConfig.Debug.LobbyMode
 	local mode: LobbyService.LobbyMode = if modeRaw == "Day" then "Day" else "Night"
 
-	MatchService.beginMatch(players, mode)
-	MatchService.setDebugSolo(true)
-	if not MatchService.beginNextRound() then
+	local ok, err = pcall(function()
+		MatchService.beginMatch(players, mode)
+		MatchService.setDebugSolo(true)
+		if not MatchService.beginNextRound() then
+			MatchService.reset()
+			transitioning = false
+			return
+		end
+		pendingMode = nil
+		lobbyCountdown = 0
+
+		TeamService.assignDebugSolo(players, GameConfig.Debug.Side)
+		LobbyService.applyMatchLighting(mode)
+		prepareDebugPlayers(players)
+
+		announce(
+			string.format(
+				"DEBUG SOLO LIVE — %s · walk off pad next time to use Day/Night",
+				GameConfig.Debug.DefaultWeaponId
+			),
+			"warning"
+		)
+		beginLive()
+	end)
+	if not ok then
+		warn("[RoundService] DEBUG solo start failed: " .. tostring(err))
 		MatchService.reset()
+		TeamService.reset()
+		state = Enums.RoundState.Lobby
+		pendingMode = nil
+		lobbyCountdown = 0
+		timeRemaining = 0
 		transitioning = false
-		return
+		CombatService.setRoundLive(false)
+		broadcastRound()
 	end
-	pendingMode = nil
-	lobbyCountdown = 0
-
-	TeamService.assignDebugSolo(players, GameConfig.Debug.Side)
-	LobbyService.applyMatchLighting(mode)
-	prepareDebugPlayers(players)
-
-	announce(
-		string.format(
-			"DEBUG SOLO LIVE — %s · walk off pad next time to use Day/Night",
-			GameConfig.Debug.DefaultWeaponId
-		),
-		"warning"
-	)
-	beginLive()
 end
 
 local function pickArmedZone(): (LobbyService.LobbyMode?, { Player })

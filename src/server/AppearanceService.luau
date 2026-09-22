@@ -17,19 +17,34 @@ local AppearanceService = {}
 
 local ATTR_APPLIED = "VipRoleAppearance"
 
+--[[
+	Strip torso layered pieces that would cover classic Shirt/Pants.
+	Accessory string props are not present on every Studio/engine build —
+	pcall each write so missing members never abort role apply / round start.
+]]
 local function clearLayeredClothing(description: HumanoidDescription)
-	-- Keep hair / face / neck / hats so players stay recognizable; strip torso
-	-- layered pieces that would cover the classic shirt/pants kit.
-	description.GraphicTShirt = 0
-	description.ShirtAccessory = 0
-	description.TShirtAccessory = 0
-	description.SweaterAccessory = 0
-	description.JacketAccessory = 0
-	description.PantsAccessory = 0
-	description.ShortsAccessory = 0
-	description.DressSkirtAccessory = 0
-	description.LeftShoeAccessory = 0
-	description.RightShoeAccessory = 0
+	local descAny = description :: any
+	pcall(function()
+		descAny.GraphicTShirt = 0
+	end)
+	-- These are comma-separated accessory id strings when the API exposes them.
+	for _, key in
+		{
+			"ShirtAccessory",
+			"TShirtAccessory",
+			"SweaterAccessory",
+			"JacketAccessory",
+			"PantsAccessory",
+			"ShortsAccessory",
+			"DressSkirtAccessory",
+			"LeftShoeAccessory",
+			"RightShoeAccessory",
+		}
+	do
+		pcall(function()
+			descAny[key] = ""
+		end)
+	end
 end
 
 local function stripCoveringAccessories(character: Model)
@@ -69,59 +84,76 @@ local function baseDescription(player: Player, humanoid: Humanoid): HumanoidDesc
 	return humanoid:GetAppliedDescription()
 end
 
+local function applyClassicClothes(character: Model, kit: RoleAppearances.RoleKit)
+	local shirt = character:FindFirstChildOfClass("Shirt") :: Shirt?
+	if not shirt then
+		shirt = Instance.new("Shirt")
+		shirt.Parent = character
+	end
+	local pants = character:FindFirstChildOfClass("Pants") :: Pants?
+	if not pants then
+		pants = Instance.new("Pants")
+		pants.Parent = character
+	end
+	shirt.ShirtTemplate = "rbxassetid://" .. tostring(kit.shirtAssetId)
+	pants.PantsTemplate = "rbxassetid://" .. tostring(kit.pantsAssetId)
+end
+
 --- Apply the kit for the player's current TeamService role (no-op if Unassigned).
+--- Never throws — spawn / debug-solo / buy must continue even if skins fail.
 function AppearanceService.applyRole(player: Player, role: string?)
-	local character = player.Character
-	if not character then
-		return
-	end
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	if not humanoid then
-		return
-	end
+	local okOuter, errOuter = pcall(function()
+		local character = player.Character
+		if not character then
+			return
+		end
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if not humanoid then
+			return
+		end
 
-	local resolved = role or (character:GetAttribute("Role") :: string?) or Enums.Role.Unassigned
-	local kit = RoleAppearances.getKit(resolved)
-	if not kit then
-		character:SetAttribute(ATTR_APPLIED, Enums.Role.Unassigned)
-		return
-	end
+		local resolved = role
+			or (character:GetAttribute("Role") :: string?)
+			or Enums.Role.Unassigned
+		local kit = RoleAppearances.getKit(resolved)
+		if not kit then
+			character:SetAttribute(ATTR_APPLIED, Enums.Role.Unassigned)
+			return
+		end
 
-	local description = baseDescription(player, humanoid)
-	clearLayeredClothing(description)
-	description.Shirt = kit.shirtAssetId
-	description.Pants = kit.pantsAssetId
+		local description = baseDescription(player, humanoid)
+		clearLayeredClothing(description)
+		description.Shirt = kit.shirtAssetId
+		description.Pants = kit.pantsAssetId
 
-	stripCoveringAccessories(character)
+		stripCoveringAccessories(character)
 
-	local ok, err = pcall(function()
-		humanoid:ApplyDescriptionAsync(description)
+		local ok, err = pcall(function()
+			humanoid:ApplyDescriptionAsync(description)
+		end)
+		if not ok then
+			warn(
+				string.format(
+					"[AppearanceService] ApplyDescription failed for %s role=%s: %s",
+					player.Name,
+					resolved,
+					tostring(err)
+				)
+			)
+			applyClassicClothes(character, kit)
+		end
+
+		character:SetAttribute(ATTR_APPLIED, resolved)
 	end)
-	if not ok then
+	if not okOuter then
 		warn(
 			string.format(
-				"[AppearanceService] ApplyDescription failed for %s role=%s: %s",
+				"[AppearanceService] applyRole aborted for %s: %s",
 				player.Name,
-				resolved,
-				tostring(err)
+				tostring(errOuter)
 			)
 		)
-		-- Fallback: classic Shirt/Pants siblings (HumanoidDescription is preferred).
-		local shirt = character:FindFirstChildOfClass("Shirt") :: Shirt?
-		if not shirt then
-			shirt = Instance.new("Shirt")
-			shirt.Parent = character
-		end
-		local pants = character:FindFirstChildOfClass("Pants") :: Pants?
-		if not pants then
-			pants = Instance.new("Pants")
-			pants.Parent = character
-		end
-		shirt.ShirtTemplate = "rbxassetid://" .. tostring(kit.shirtAssetId)
-		pants.PantsTemplate = "rbxassetid://" .. tostring(kit.pantsAssetId)
 	end
-
-	character:SetAttribute(ATTR_APPLIED, resolved)
 end
 
 --- Restore the player's own avatar (lobby / ready pad).
