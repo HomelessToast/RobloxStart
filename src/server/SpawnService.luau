@@ -5,11 +5,26 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local GameConfig = require(ReplicatedStorage.Shared.GameConfig)
 local Enums = require(ReplicatedStorage.Shared.Enums)
 local MapService = require(script.Parent.MapService)
+local LobbyService = require(script.Parent.LobbyService)
 local TeamService = require(script.Parent.TeamService)
 
 local SpawnService = {}
 
 local frozen: { [Player]: boolean } = {}
+
+function SpawnService.teleportToLobby(player: Player)
+	local character = player.Character
+	if not character then
+		return
+	end
+	local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not root then
+		return
+	end
+	root.CFrame = LobbyService.getSpawnCFrame()
+	character:SetAttribute("Side", Enums.Side.Spectator)
+	character:SetAttribute("Role", Enums.Role.Unassigned)
+end
 
 function SpawnService.teleportToSideSpawn(player: Player)
 	local character = player.Character

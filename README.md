@@ -22,8 +22,11 @@ Consulate / Precinct):
 | Metric greybox from `MapMetrics` + `MapService` (git-tracked Parts builder) | Yes |
 | Best of 7, side swap, economy / buy, roll ability, full arsenal | Deferred (slices 1–3) |
 
-Rounds loop forever after a short lobby. With 2 players: lowest `UserId` is President
-(Good), the other is Terrorist. Extra players fill bodyguards then terrorists.
+Rounds loop forever. Match start is **not** automatic on join — players spawn on the
+elevated **VIP briefing lobby** (south/above the city). Stand in a **Day** or **Night**
+ready pad with **2–10** players to arm that mode’s 5s countdown, then teleport onto
+Motorcade / Market. With 2 players: lowest `UserId` is President (Good), the other is
+Terrorist. Extra players fill bodyguards then terrorists (capped at 10 / 5v5).
 
 ## Repo layout
 
@@ -113,16 +116,26 @@ Then in Roblox Studio:
 3. Confirm Explorer shows `ServerScriptService.Server.Bootstrap` and a large asphalt
    `Workspace.Baseplate` (~1000×800). If those are missing, you are not synced.
 4. Press **Play** (F5) — not just open the place. The greybox is built by the
-   **server** on start (`Bootstrap` → `MapService.build`). Edit mode only has the
-   baseplate + spawn pad until Play runs.
-5. You should land at the Motorcade (south) **on the street**, see a readable
-   **orthogonal asphalt grid** with a varied skyline on the blocks between roads,
-   tall perimeter facade walls, Consulate (blue/west) and Precinct (orange/east),
-   a SW **landmark perch**, plus climbable **TrussPart ladders** on elevated
-   outlier towers (not every roof). Output must show
-   `[MapService] Metric VIP greybox built` and `[MapValidator] PASS`.
+   **server** on start (`Bootstrap` → `MapService.build` → `LobbyService.build`).
+   Edit mode only has the baseplate + spawn pad until Play runs.
+5. You should **spawn on the elevated VIP lobby** (south of the city, high above),
+   see the greybox **below and north in the distance**, with **Night** (blue, west)
+   and **Day** (gold, east) ready pads. Output must show
+   `[MapService] Metric VIP greybox built`, `[MapValidator] PASS`, and
+   `[LobbyService] VIP briefing deck…`.
 
-Solo Play is enough to **see** the map. A round still needs **2 players**.
+Solo Play is enough to **see** the map from the lobby. A round still needs **2 players**
+standing together in the same ready pad.
+
+### Lobby → match (quick test)
+
+1. Start **two** Studio clients (local server + players, or Team Test).
+2. Both join → land on the briefing deck (not Motorcade).
+3. Walk into the same ready pad (**Night** = evening streetlights, **Day** = bright sun).
+4. When **2+** are in that pad (max **10** teleported), a 5s countdown arms that mode.
+5. On go: those players teleport to Motorcade / Market; Day matches flip `Lighting` to
+   daytime; Night keeps the existing evening mood. After round end, everyone returns
+   to the lobby and evening lighting is restored.
 
 Or build a place file and open it (still press Play):
 
@@ -133,22 +146,25 @@ rojo build default.project.json --output build/game.rbxl
 
 ### 3. Playtest checklist (Matthew)
 
-1. Follow §2 (serve → Connect → Play) so `Workspace.VIPMap` exists.
+1. Follow §2 (serve → Connect → Play) so `Workspace.VIPMap` **and** `Workspace.VIPLobby` exist.
 2. Start **two** Studio clients (local server + 1 player, or Team Test) for a round.
-3. Wait for the 5s lobby countdown → round goes `LIVE`.
-4. Confirm roles on the HUD (Good · President vs Terrorist).
-5. Confirm Output shows `[MapValidator] PASS` and the path report.
-6. Walk the yellow path ribbons: A↔B should feel ~45s sprint; houses are Consulate
+3. Confirm both spawn on the elevated lobby (city visible below/north), not Motorcade.
+4. Both stand in **Night** ready pad → 5s countdown → `LIVE` with evening streetlights.
+5. (Optional) After round end, return to lobby; both stand in **Day** pad → `LIVE` with
+   bright daytime Lighting; after round end, lobby evening mood restores.
+6. Confirm roles on the HUD (Good · President vs Terrorist).
+7. Confirm Output shows `[MapValidator] PASS` and the path report (city metrics unchanged).
+8. Walk the yellow path ribbons: A↔B should feel ~45s sprint; houses are Consulate
    (blue, west) and Precinct (orange, east).
-7. **Capture win:** President stands inside a green capture volume / yellow boundary
+9. **Capture win:** President stands inside a green capture volume / yellow boundary
    for 30s without leaving.
-8. **Capture break:** leave the volume mid-hold → progress resets; banner says broken.
-9. **Kill win:** Terrorist shoots the President (LMB) → Terrorists win immediately.
-10. **Wipe win:** President eliminates the only terrorist → Good wins.
-11. **Disconnect:** stop the President client mid-round → Terrorists win.
-12. **Deadline:** after the timer drops below 0:30, entering a house shows `TOO LATE`
+10. **Capture break:** leave the volume mid-hold → progress resets; banner says broken.
+11. **Kill win:** Terrorist shoots the President (LMB) → Terrorists win immediately.
+12. **Wipe win:** President eliminates the only terrorist → Good wins.
+13. **Disconnect:** stop the President client mid-round → Terrorists win.
+14. **Deadline:** after the timer drops below 0:30, entering a house shows `TOO LATE`
     and does not start capture; banner switches to `ELIMINATE`.
-13. Spot-check: no lethal falls on stair/rooftop approaches; alleys act as
+15. Spot-check: no lethal falls on stair/rooftop approaches; alleys act as
     costly bypasses vs primary roads; Market mid-avenue has one LOS island only
     (no floating choke slabs / arcade / MidCover barriers in the street).
 

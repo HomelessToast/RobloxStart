@@ -1,5 +1,6 @@
 --!strict
 -- Owns the round state machine and the 300s LIVE clock. Nothing may pause or extend that clock.
+-- Lobby start is gated by Day/Night ready pads on the elevated VIPLobby deck.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -11,6 +12,7 @@ local Net = require(ReplicatedStorage.Shared.Net)
 
 local Remotes = require(script.Parent.Remotes)
 local MapService = require(script.Parent.MapService)
+local LobbyService = require(script.Parent.LobbyService)
 local TeamService = require(script.Parent.TeamService)
 local SpawnService = require(script.Parent.SpawnService)
 local LoadoutService = require(script.Parent.LoadoutService)
@@ -30,13 +32,42 @@ local heartbeatConn: RBXScriptConnection? = nil
 local broadcastAccum = 0
 local BROADCAST_INTERVAL = 0.25
 
+-- Which ready pad armed the current lobby countdown (nil = waiting for a zone).
+local pendingMode: LobbyService.LobbyMode? = nil
+-- Roster captured when LIVE begins (players standing in the armed zone, capped at 10).
+local matchRoster: { Player } = {}
+
 local function broadcastRound()
 	local banner = ObjectiveService.objectiveBanner(timeRemaining, state)
+	if state == Enums.RoundState.Lobby then
+		local nightN = #LobbyService.getPlayersInZone("Night")
+		local dayN = #LobbyService.getPlayersInZone("Day")
+		local minN = GameConfig.MinPlayersToStart
+		local maxN = GameConfig.MaxPlayersPerLobbyZone
+		if pendingMode then
+			banner = string.format(
+				"%s READY — match starts in %ds (%d/%d)",
+				string.upper(pendingMode),
+				math.max(0, math.ceil(lobbyCountdown)),
+				#LobbyService.getPlayersInZone(pendingMode),
+				maxN
+			)
+		else
+			banner = string.format(
+				"Stand in DAY or NIGHT ready pad · Night %d  Day %d  (need %d–%d)",
+				nightN,
+				dayN,
+				minN,
+				maxN
+			)
+		end
+	end
 	Remotes.get(Net.RoundState):FireAllClients({
 		state = state,
 		timeRemaining = math.max(timeRemaining, 0),
 		roundNumber = roundNumber,
 		objectiveBanner = banner,
+		lobbyMode = pendingMode,
 	})
 end
 
@@ -58,15 +89,30 @@ local function respawnPlayer(player: Player)
 	player:LoadCharacter()
 end
 
-local function prepareAllPlayers()
+local function returnEveryoneToLobby()
+	LobbyService.applyLobbyLighting()
+	pendingMode = nil
+	lobbyCountdown = 0
+	table.clear(matchRoster)
 	for _, player in Players:GetPlayers() do
 		if not player.Character then
 			respawnPlayer(player)
 		end
 	end
-	-- Wait briefly for characters
-	task.wait(0.5)
+	task.wait(0.4)
 	for _, player in Players:GetPlayers() do
+		SpawnService.teleportToLobby(player)
+	end
+end
+
+local function prepareMatchPlayers(players: { Player })
+	for _, player in players do
+		if not player.Character then
+			respawnPlayer(player)
+		end
+	end
+	task.wait(0.5)
+	for _, player in players do
 		if player.Character then
 			SpawnService.prepareCharacter(player)
 			LoadoutService.grant(player)
@@ -109,7 +155,7 @@ local function enterRoundEnd(resolution: ObjectiveService.Resolution)
 	)
 end
 
-local function beginLive()
+local function beginLive(mode: LobbyService.LobbyMode, players: { Player })
 	ending = false
 	roundNumber += 1
 	ObjectiveService.resetFlags()
@@ -117,12 +163,15 @@ local function beginLive()
 	LoadoutService.clear()
 	CaptureService.reset()
 
-	local players = Players:GetPlayers()
+	matchRoster = table.clone(players)
 	TeamService.assignForRound(players)
-	prepareAllPlayers()
+	LobbyService.applyMatchLighting(mode)
+	prepareMatchPlayers(players)
 
 	state = Enums.RoundState.Live
 	timeRemaining = GameConfig.RoundDurationSeconds
+	pendingMode = nil
+	lobbyCountdown = 0
 	CombatService.setRoundLive(true)
 	CaptureService.startMonitoring()
 	broadcastRound()
@@ -131,40 +180,57 @@ local function beginLive()
 	local prez = TeamService.getPresident()
 	print(
 		string.format(
-			"[RoundService] Round %d LIVE — President=%s, players=%d",
+			"[RoundService] Round %d LIVE (%s) — President=%s, players=%d",
 			roundNumber,
+			mode,
 			if prez then prez.Name else "?",
 			#players
 		)
 	)
 end
 
-local function tryStartFromLobby()
-	local count = #Players:GetPlayers()
-	if count < GameConfig.MinPlayersToStart then
-		lobbyCountdown = 0
-		timeRemaining = 0
-		state = Enums.RoundState.Lobby
-		broadcastRound()
-		return
-	end
+local function pickArmedZone(): (LobbyService.LobbyMode?, { Player })
+	local minN = GameConfig.MinPlayersToStart
+	local nightPlayers = LobbyService.getPlayersInZone("Night")
+	local dayPlayers = LobbyService.getPlayersInZone("Day")
+	local nightReady = #nightPlayers >= minN
+	local dayReady = #dayPlayers >= minN
 
-	if lobbyCountdown <= 0 then
-		lobbyCountdown = GameConfig.LobbyCountdownSeconds
+	-- Prefer the pad that already owns the countdown; otherwise the fuller pad.
+	if pendingMode == "Night" and nightReady then
+		return "Night", nightPlayers
 	end
+	if pendingMode == "Day" and dayReady then
+		return "Day", dayPlayers
+	end
+	if nightReady and dayReady then
+		if #nightPlayers >= #dayPlayers then
+			return "Night", nightPlayers
+		end
+		return "Day", dayPlayers
+	end
+	if nightReady then
+		return "Night", nightPlayers
+	end
+	if dayReady then
+		return "Day", dayPlayers
+	end
+	return nil, {}
 end
 
 function RoundService.step(dt: number)
 	if state == Enums.RoundState.Lobby then
-		local count = #Players:GetPlayers()
-		if count < GameConfig.MinPlayersToStart then
+		local mode, _ = pickArmedZone()
+		if not mode then
+			pendingMode = nil
 			lobbyCountdown = 0
 			timeRemaining = 0
 			broadcastRoundThrottled(dt)
 			return
 		end
 
-		if lobbyCountdown <= 0 then
+		if pendingMode ~= mode then
+			pendingMode = mode
 			lobbyCountdown = GameConfig.LobbyCountdownSeconds
 		end
 
@@ -173,7 +239,16 @@ function RoundService.step(dt: number)
 		broadcastRoundThrottled(dt)
 
 		if lobbyCountdown <= 0 then
-			beginLive()
+			-- Re-sample at go-time so leavers aren't teleported; cap at 10.
+			local roster = LobbyService.takeMatchRoster(mode)
+			if #roster < GameConfig.MinPlayersToStart then
+				pendingMode = nil
+				lobbyCountdown = 0
+				timeRemaining = 0
+				broadcastRound()
+				return
+			end
+			beginLive(mode, roster)
 		end
 		return
 	end
@@ -184,10 +259,11 @@ function RoundService.step(dt: number)
 		if timeRemaining <= 0 then
 			-- Slice 0: loop forever, no match score / side swap.
 			state = Enums.RoundState.Lobby
-			lobbyCountdown = GameConfig.LobbyCountdownSeconds
 			ending = false
 			CombatService.setRoundLive(false)
 			CaptureService.reset()
+			TeamService.reset()
+			returnEveryoneToLobby()
 			broadcastRound()
 		end
 		return
@@ -255,11 +331,14 @@ function RoundService.onPlayerRemoving(player: Player)
 end
 
 function RoundService.init()
-	-- Greybox + MapValidator run in Bootstrap.server before this init so the
-	-- map is visible even if remotes / round wiring fail later.
+	-- Greybox + MapValidator + Lobby run in Bootstrap.server before this init.
 	assert(
 		MapService.getFolder(),
 		"[RoundService] VIPMap missing — Bootstrap must build the map first"
+	)
+	assert(
+		LobbyService.getFolder(),
+		"[RoundService] VIPLobby missing — Bootstrap must build the lobby first"
 	)
 	CaptureService.setRoundRemainingGetter(function()
 		return timeRemaining
@@ -283,12 +362,14 @@ function RoundService.init()
 
 	Players.PlayerAdded:Connect(function(player)
 		player.CharacterAdded:Connect(function()
-			if state == Enums.RoundState.Live or state == Enums.RoundState.Capture then
-				-- Late join mid-round: spectator only (slice 0 — no mid-round join to teams).
+			if state == Enums.RoundState.Lobby or state == Enums.RoundState.RoundEnd then
+				task.defer(function()
+					SpawnService.teleportToLobby(player)
+				end)
 				return
 			end
+			-- Late join mid-round: spectator only (slice 0 — no mid-round join to teams).
 		end)
-		tryStartFromLobby()
 		broadcastRound()
 	end)
 
@@ -296,8 +377,18 @@ function RoundService.init()
 		RoundService.onPlayerRemoving(player)
 	end)
 
-	if #Players:GetPlayers() > 0 then
-		tryStartFromLobby()
+	-- Already-present players (Studio soft restart) land on the lobby deck.
+	for _, player in Players:GetPlayers() do
+		player.CharacterAdded:Connect(function()
+			if state == Enums.RoundState.Lobby or state == Enums.RoundState.RoundEnd then
+				task.defer(function()
+					SpawnService.teleportToLobby(player)
+				end)
+			end
+		end)
+		if player.Character then
+			SpawnService.teleportToLobby(player)
+		end
 	end
 
 	if heartbeatConn then
@@ -310,9 +401,10 @@ function RoundService.init()
 	broadcastRound()
 	print(
 		string.format(
-			"[RoundService] %s slice 0 ready (min players=%d).",
+			"[RoundService] %s lobby ready (Day/Night pads, min=%d max=%d per zone).",
 			GameConfig.GameName,
-			GameConfig.MinPlayersToStart
+			GameConfig.MinPlayersToStart,
+			GameConfig.MaxPlayersPerLobbyZone
 		)
 	)
 end

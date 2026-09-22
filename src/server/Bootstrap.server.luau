@@ -1,12 +1,14 @@
 --!strict
--- Server entrypoint: build the greybox first, then wire remotes / round loop.
+-- Server entrypoint: city greybox first, then elevated VIP lobby, then remotes / round loop.
 -- Map must appear on any Play (including solo) even if later services error.
 
 local MapService = require(script.Parent.MapService)
 local MapValidator = require(script.Parent.MapValidator)
+local LobbyService = require(script.Parent.LobbyService)
 
 MapService.build()
 MapValidator.runAndPrint()
+LobbyService.build()
 
 local Remotes = require(script.Parent.Remotes)
 local RoundService = require(script.Parent.RoundService)

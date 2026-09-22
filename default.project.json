@@ -60,7 +60,7 @@
           "Neutral": true,
           "Duration": 0,
           "Size": [12, 1, 12],
-          "Position": [0, 0.5, -500],
+          "Position": [0, 186.5, -1036],
           "TopSurface": "Smooth",
           "BottomSurface": "Smooth"
         }

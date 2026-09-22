@@ -6,6 +6,7 @@ local GameConfig = {
 
 	-- Match / round (slice 0: endless rounds, no bo7 / side swap yet)
 	MinPlayersToStart = 2,
+	MaxPlayersPerLobbyZone = 10, -- day and night ready pads each cap at 10 (5v5)
 	LobbyCountdownSeconds = 5,
 	RoundEndSeconds = 7,
 	RoundDurationSeconds = 300,
@@ -13,6 +14,24 @@ local GameConfig = {
 	-- Last viable entry is strictly before this remaining time (t=270 → 30s left).
 	CaptureEntryDeadlineRemaining = 30,
 	LastEntryWarningRemaining = 35,
+
+	--[[
+		Elevated VIP briefing lobby (south of the city, high Y).
+		City arena ≈ X±450 / Z −540…200 / walls ~148 — lobby sits further south
+		and above so the greybox stays visible below + north in the distance.
+		Compact pad; Day and Night ready zones share one platform.
+	]]
+	Lobby = {
+		Center = Vector3.new(0, 185, -1050),
+		PlatformSize = Vector3.new(78, 2, 42),
+		DeckThickness = 2,
+		RailHeight = 4,
+		-- Ready pads sit on the deck; volumes are tall enough for HumanoidRootPart.
+		ReadyZoneSize = Vector3.new(28, 12, 28),
+		NightZoneLocalOffset = Vector3.new(-18, 0, 0), -- west pad
+		DayZoneLocalOffset = Vector3.new(18, 0, 0), -- east pad
+		SpawnLocalOffset = Vector3.new(0, 0, 14), -- south edge of deck (arrive outside pads)
+	},
 
 	-- Combat
 	FriendlyFire = false,
