@@ -26,6 +26,12 @@
 	- Consulate (A): open diplomatic plaza — planters, bollards, sparse cover
 	- Precinct (B): tighter police courtyard — jersey barriers, denser cover
 
+	City lighting (greybox fixtures only — no new mechanics):
+	- Streetlights on road-grid junction curbs (PointLight, Shadows off)
+	- Site / entrance sconces at Consulate + Precinct
+	- Spawn pool illumination at Motorcade + Market
+	Does not move anchors, LOS blocker, perimeter, or sniper ladders.
+
 	Also: MapAnchor tags, CaptureBoundary markers, costly choke bypasses,
 	tall city perimeter walls, discrete TrussPart ladder climbs onto selected
 	roofs (no rooftop highway), overhead arcade, no lethal VIP falls.
@@ -33,6 +39,7 @@
 ]]
 
 local CollectionService = game:GetService("CollectionService")
+local Lighting = game:GetService("Lighting")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -70,6 +77,8 @@ local COLOR = {
 	planter = Color3.fromRGB(70, 88, 62),
 	vehicle = Color3.fromRGB(45, 48, 55),
 	barrier = Color3.fromRGB(160, 120, 50),
+	lamp = Color3.fromRGB(55, 55, 58),
+	lampGlow = Color3.fromRGB(255, 230, 170),
 }
 
 -- Playable arena AABB (parcel grid ± margin). Perimeter walls seal this volume.
@@ -1853,6 +1862,348 @@ local function buildVantages(parent: Folder)
 	)
 end
 
+--[[
+	Evening atmosphere so street / site lights actually matter in canyons.
+	City-first mood only — no gameplay change.
+]]
+local function configureCityAtmosphere()
+	Lighting.ClockTime = 20.25
+	Lighting.Brightness = 1.1
+	Lighting.Ambient = Color3.fromRGB(42, 46, 58)
+	Lighting.OutdoorAmbient = Color3.fromRGB(58, 62, 72)
+	Lighting.ColorShift_Top = Color3.fromRGB(40, 50, 80)
+	Lighting.ColorShift_Bottom = Color3.fromRGB(20, 22, 28)
+	Lighting.EnvironmentDiffuseScale = 0.35
+	Lighting.EnvironmentSpecularScale = 0.25
+	Lighting.GlobalShadows = true
+end
+
+local WARM_LIGHT = Color3.fromRGB(255, 228, 185)
+local COOL_SITE = Color3.fromRGB(210, 230, 255)
+local SPAWN_LIGHT = Color3.fromRGB(255, 210, 160)
+
+local function attachPointLight(
+	host: BasePart,
+	range: number,
+	brightness: number,
+	color: Color3
+): PointLight
+	local light = Instance.new("PointLight")
+	light.Name = "Glow"
+	light.Range = range
+	light.Brightness = brightness
+	light.Color = color
+	light.Shadows = false -- perf: city count is moderate; shadow casters explode cost
+	light.Parent = host
+	return light
+end
+
+-- Greybox lamp post on a curb (pole + neon head + PointLight).
+local function streetLamp(parent: Folder, name: string, x: number, z: number)
+	local floorY = MapMetrics.FloorY
+	local poleH = 16
+	part(
+		parent,
+		name .. "_Pole",
+		Vector3.new(0.7, poleH, 0.7),
+		CFrame.new(x, floorY + poleH / 2, z),
+		COLOR.lamp,
+		Enum.Material.Metal
+	)
+	local head = part(
+		parent,
+		name .. "_Head",
+		Vector3.new(2.2, 1.1, 2.2),
+		CFrame.new(x, floorY + poleH + 0.35, z),
+		COLOR.lampGlow,
+		Enum.Material.Neon,
+		false
+	)
+	head.Transparency = 0.12
+	attachPointLight(head, 52, 1.3, WARM_LIGHT)
+end
+
+-- Compact wall / entrance sconce (no tall pole — site interiors + door gaps).
+local function siteSconce(
+	parent: Folder,
+	name: string,
+	position: Vector3,
+	range: number,
+	brightness: number,
+	color: Color3
+)
+	local fixture = part(
+		parent,
+		name,
+		Vector3.new(2, 1.4, 2),
+		CFrame.new(position),
+		COLOR.lampGlow,
+		Enum.Material.Neon,
+		false
+	)
+	fixture.Transparency = 0.18
+	attachPointLight(fixture, range, brightness, color)
+end
+
+-- SpotLight on a fixture aimed along `look` (gate washes into a courtyard).
+local function siteSpot(
+	parent: Folder,
+	name: string,
+	position: Vector3,
+	look: Vector3,
+	range: number,
+	brightness: number,
+	angle: number
+)
+	local dir = Vector3.new(look.X, 0, look.Z)
+	if dir.Magnitude < 0.1 then
+		dir = Vector3.new(0, 0, -1)
+	else
+		dir = dir.Unit
+	end
+	local fixture = part(
+		parent,
+		name,
+		Vector3.new(1.6, 1.2, 1.6),
+		CFrame.lookAt(position, position + dir),
+		COLOR.lampGlow,
+		Enum.Material.Neon,
+		false
+	)
+	fixture.Transparency = 0.2
+	local spot = Instance.new("SpotLight")
+	spot.Name = "Glow"
+	spot.Face = Enum.NormalId.Front
+	spot.Angle = angle
+	spot.Range = range
+	spot.Brightness = brightness
+	spot.Color = WARM_LIGHT
+	spot.Shadows = false
+	spot.Parent = fixture
+end
+
+local function lightConsulate(parent: Folder, center: Vector3)
+	local folder = Instance.new("Folder")
+	folder.Name = "ConsulateLights"
+	folder.Parent = parent
+	local floorY = MapMetrics.FloorY
+	local interior = GameConfig.Map.HouseInteriorSize
+	local halfX = interior.X / 2
+	local halfZ = interior.Z / 2
+
+	-- Dual entrances (south + west gaps)
+	siteSconce(
+		folder,
+		"EntranceSouth",
+		Vector3.new(center.X, floorY + 9, center.Z + halfZ - 1),
+		38,
+		1.6,
+		COOL_SITE
+	)
+	siteSconce(
+		folder,
+		"EntranceWest",
+		Vector3.new(center.X - halfX + 1, floorY + 9, center.Z),
+		38,
+		1.6,
+		COOL_SITE
+	)
+	-- Pavilion canopy fill + sparse plaza rim (open hold readability)
+	siteSconce(
+		folder,
+		"CanopyFill",
+		Vector3.new(center.X, floorY + 12, center.Z - 4),
+		42,
+		1.4,
+		WARM_LIGHT
+	)
+	siteSconce(
+		folder,
+		"PlazaApproachS",
+		Vector3.new(center.X, floorY + 10, center.Z + 44),
+		36,
+		1.2,
+		WARM_LIGHT
+	)
+	siteSconce(
+		folder,
+		"PlazaRimW",
+		Vector3.new(center.X - 40, floorY + 8, center.Z),
+		32,
+		1.1,
+		WARM_LIGHT
+	)
+	siteSconce(
+		folder,
+		"PlazaRimE",
+		Vector3.new(center.X + 40, floorY + 8, center.Z),
+		32,
+		1.1,
+		WARM_LIGHT
+	)
+end
+
+local function lightPrecinct(parent: Folder, center: Vector3)
+	local folder = Instance.new("Folder")
+	folder.Name = "PrecinctLights"
+	folder.Parent = parent
+	local floorY = MapMetrics.FloorY
+	local interior = GameConfig.Map.HouseInteriorSize
+	local halfX = interior.X / 2
+	local halfZ = interior.Z / 2
+
+	-- South gate wash into the yard + gate-post sconces
+	siteSpot(
+		folder,
+		"GateSpot",
+		Vector3.new(center.X, floorY + 11, center.Z + 38),
+		Vector3.new(0, 0, -1),
+		48,
+		2.0,
+		75
+	)
+	siteSconce(
+		folder,
+		"GatePostL",
+		Vector3.new(center.X - 8, floorY + 11, center.Z + 40),
+		28,
+		1.3,
+		WARM_LIGHT
+	)
+	siteSconce(
+		folder,
+		"GatePostR",
+		Vector3.new(center.X + 8, floorY + 11, center.Z + 40),
+		28,
+		1.3,
+		WARM_LIGHT
+	)
+	siteSconce(
+		folder,
+		"EntranceWest",
+		Vector3.new(center.X - halfX + 1, floorY + 9, center.Z),
+		36,
+		1.5,
+		COOL_SITE
+	)
+	siteSconce(
+		folder,
+		"YardCenter",
+		Vector3.new(center.X, floorY + 10, center.Z + 8),
+		40,
+		1.35,
+		WARM_LIGHT
+	)
+	siteSconce(
+		folder,
+		"StationInterior",
+		Vector3.new(center.X - 4, floorY + 10, center.Z - 4),
+		34,
+		1.45,
+		COOL_SITE
+	)
+	siteSconce(
+		folder,
+		"SouthDoorGap",
+		Vector3.new(center.X, floorY + 9, center.Z + halfZ - 1),
+		32,
+		1.4,
+		COOL_SITE
+	)
+end
+
+local function lightSpawns(parent: Folder)
+	local folder = Instance.new("Folder")
+	folder.Name = "SpawnLights"
+	folder.Parent = parent
+	local floorY = MapMetrics.FloorY
+	local motorcade = MapMetrics.Anchors.Motorcade.position
+	local market = MapMetrics.Anchors.Market.position
+
+	-- Triad of poles around each spawn pad (road-centerline pools stay readable)
+	local offsets = {
+		{ 14, 10 },
+		{ -14, 10 },
+		{ 0, -14 },
+	}
+	for i, off in offsets do
+		streetLamp(folder, "MotorcadeLamp" .. i, motorcade.X + off[1], motorcade.Z + off[2])
+		streetLamp(folder, "MarketLamp" .. i, market.X + off[1], market.Z + off[2])
+	end
+	-- Soft overhead fills so jittered spawns (±14 X) stay lit
+	siteSconce(
+		folder,
+		"MotorcadeFill",
+		Vector3.new(motorcade.X, floorY + 14, motorcade.Z),
+		36,
+		1.5,
+		SPAWN_LIGHT
+	)
+	siteSconce(
+		folder,
+		"MarketFill",
+		Vector3.new(market.X, floorY + 14, market.Z),
+		36,
+		1.5,
+		SPAWN_LIGHT
+	)
+end
+
+--[[
+	City lighting pass: street grid curbs + site entrances + spawn pools.
+	Reasonable density (junction curbs, not every stud). Shadows off on lights.
+]]
+local function buildCityLighting(mapRoot: Folder)
+	configureCityAtmosphere()
+
+	local root = Instance.new("Folder")
+	root.Name = "CityLighting"
+	root.Parent = mapRoot
+
+	local streets = Instance.new("Folder")
+	streets.Name = "StreetLights"
+	streets.Parent = root
+
+	-- One curb lamp per ortho junction (NW curb). ~81 fixtures for the 9×9 grid —
+	-- enough to read canyons without carpet-bombing every stud.
+	local curb = ROAD_HALF - 2
+	local lampIdx = 0
+	for _, x in GRID_XS do
+		for _, z in GRID_ZS do
+			lampIdx += 1
+			streetLamp(streets, "SL_" .. lampIdx, x - curb, z - curb)
+		end
+	end
+
+	-- Sparse alley midpoints (secondary cuts — fewer lights than primary grid)
+	local alleys = Instance.new("Folder")
+	alleys.Name = "AlleyLights"
+	alleys.Parent = root
+	local alleyMids = {
+		{ -250, -300 },
+		{ -250, -100 },
+		{ 250, -300 },
+		{ 250, -100 },
+		{ -150, -150 },
+		{ 150, -150 },
+	}
+	for i, mid in alleyMids do
+		streetLamp(alleys, "AlleyLamp" .. i, mid[1] + 5, mid[2])
+	end
+
+	lightConsulate(root, MapMetrics.Anchors.Consulate.position)
+	lightPrecinct(root, MapMetrics.Anchors.Precinct.position)
+	lightSpawns(root)
+
+	local lightCount = 0
+	for _, d in root:GetDescendants() do
+		if d:IsA("PointLight") or d:IsA("SpotLight") or d:IsA("SurfaceLight") then
+			lightCount += 1
+		end
+	end
+	print(string.format("[MapService] City lighting built (%d lights).", lightCount))
+end
+
 function MapService.build()
 	local existing = Workspace:FindFirstChild("VIPMap")
 	if existing then
@@ -1907,6 +2258,7 @@ function MapService.build()
 	buildPerimeterWalls(folder)
 	buildUrbanMassing(folder)
 	buildVantages(folder)
+	buildCityLighting(folder)
 
 	-- Persist a StringValue summary for Studio inspection
 	local report = Instance.new("StringValue")
