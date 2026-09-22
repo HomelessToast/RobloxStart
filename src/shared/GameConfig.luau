@@ -69,6 +69,14 @@ local GameConfig = {
 	MaxShotDistance = 800,
 	HitValidationSlopStuds = 12,
 
+	-- Sniper ADS (client): hold RMB → FOV zoom + scope overlay. LMB still fires.
+	SniperAds = {
+		Fov = 18,
+		TweenIn = 0.12,
+		TweenOut = 0.1,
+		DefaultFovFallback = 70,
+	},
+
 	-- Armor (§5.2) — damage pool, not % reduction
 	Armor = {
 		BodyAbsorbFraction = 0.6, -- [A] primary combat dial; also in Ballistics

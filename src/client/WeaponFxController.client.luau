@@ -1,6 +1,7 @@
 --!strict
--- Client gunfeel: fire sounds, muzzle flash, tool kick, bullet tracers.
+-- Client gunfeel: punchy fire sounds, muzzle flash, tool kick, bold tracers.
 
+local ContentProvider = game:GetService("ContentProvider")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -35,26 +36,44 @@ local function playFireSound(feel: WeaponAudio.FireFeel, position: Vector3)
 	sound.SoundId = feel.soundId
 	sound.Volume = feel.volume
 	sound.PlaybackSpeed = feel.playbackSpeed
-	sound.RollOffMaxDistance = 220
-	sound.RollOffMinDistance = 12
+	-- Tight rolloff so 3rd-person doesn't get a room-filling boom.
+	sound.RollOffMaxDistance = 160
+	sound.RollOffMinDistance = 6
+	sound.RollOffMode = Enum.RollOffMode.InverseTapered
 	sound.Parent = part
-	sound:Play()
-	sound.Ended:Connect(function()
-		part:Destroy()
-	end)
-	task.delay(3, function()
+
+	-- Preload then play — cutting before Loaded made sniper (and cold assets) silent.
+	task.spawn(function()
+		pcall(function()
+			ContentProvider:PreloadAsync({ sound })
+		end)
+		if not part.Parent then
+			return
+		end
+		sound:Play()
+		local cut = math.max(feel.maxDuration, 0.05)
+		task.wait(cut)
+		if sound.Parent then
+			sound:Stop()
+		end
 		if part.Parent then
 			part:Destroy()
 		end
 	end)
 end
 
-local function spawnTracer(origin: Vector3, endPos: Vector3, feel: WeaponAudio.FireFeel)
+local function makeTracerBolt(
+	origin: Vector3,
+	endPos: Vector3,
+	width: number,
+	color: Color3,
+	transparency: number,
+	lifetime: number
+)
 	local delta = endPos - origin
-	local dist = delta.Magnitude
-	if dist < 0.5 then
-		return
-	end
+	local dist = math.max(delta.Magnitude, 4)
+	local dir = if delta.Magnitude > 0.01 then delta.Unit else Vector3.new(0, 0, -1)
+	local far = origin + dir * dist
 
 	local tracer = Instance.new("Part")
 	tracer.Name = "Tracer"
@@ -62,24 +81,45 @@ local function spawnTracer(origin: Vector3, endPos: Vector3, feel: WeaponAudio.F
 	tracer.CanCollide = false
 	tracer.CanQuery = false
 	tracer.CanTouch = false
+	tracer.CastShadow = false
 	tracer.Material = Enum.Material.Neon
-	tracer.Color = feel.tracerColor
-	tracer.Size = Vector3.new(feel.tracerWidth, feel.tracerWidth, dist)
-	tracer.CFrame = CFrame.lookAt(origin, endPos) * CFrame.new(0, 0, -dist * 0.5)
+	tracer.Color = color
+	tracer.Transparency = transparency
+	tracer.Size = Vector3.new(width, width, dist)
+	tracer.CFrame = CFrame.lookAt(origin, far) * CFrame.new(0, 0, -dist * 0.5)
 	tracer.Parent = tracerFolder
 
 	local fade = TweenService:Create(
 		tracer,
-		TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		TweenInfo.new(lifetime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
 		{
 			Transparency = 1,
-			Size = Vector3.new(feel.tracerWidth * 0.4, feel.tracerWidth * 0.4, dist),
+			Size = Vector3.new(width * 0.7, width * 0.7, dist),
 		}
 	)
 	fade:Play()
 	fade.Completed:Connect(function()
 		tracer:Destroy()
 	end)
+end
+
+local function spawnTracer(origin: Vector3, endPos: Vector3, feel: WeaponAudio.FireFeel)
+	local delta = endPos - origin
+	if delta.Magnitude < 0.35 then
+		return
+	end
+
+	-- Bright core + wider halo so shots read in 3rd person against sky/city.
+	local w = feel.tracerWidth
+	makeTracerBolt(origin, endPos, w, feel.tracerColor, 0, 0.2)
+	makeTracerBolt(
+		origin,
+		endPos,
+		w * 2.4,
+		feel.tracerColor:Lerp(Color3.new(1, 1, 1), 0.45),
+		0.4,
+		0.24
+	)
 end
 
 local function muzzleFlash(character: Model, feel: WeaponAudio.FireFeel)
@@ -100,16 +140,16 @@ local function muzzleFlash(character: Model, feel: WeaponAudio.FireFeel)
 
 	local light = Instance.new("PointLight")
 	light.Brightness = feel.muzzleBrightness
-	light.Range = 10
-	light.Color = Color3.fromRGB(255, 200, 120)
+	light.Range = 12
+	light.Color = Color3.fromRGB(255, 210, 130)
 	light.Parent = muzzle.Parent
 
 	local flash = Instance.new("Part")
 	flash.Name = "MuzzleFlash"
 	flash.Shape = Enum.PartType.Ball
-	flash.Size = Vector3.new(0.45, 0.45, 0.45)
+	flash.Size = Vector3.new(0.55, 0.55, 0.55)
 	flash.Material = Enum.Material.Neon
-	flash.Color = Color3.fromRGB(255, 230, 140)
+	flash.Color = Color3.fromRGB(255, 240, 170)
 	flash.CanCollide = false
 	flash.CanQuery = false
 	flash.CanTouch = false
@@ -147,10 +187,10 @@ local function toolKick(character: Model, feel: WeaponAudio.FireFeel)
 	end
 
 	local base = weld.C0
-	local kick = base
-		* CFrame.Angles(math.rad(-feel.kickDegrees), 0, math.rad((math.random() - 0.5) * 2))
+	local yawJitter = (math.random() - 0.5) * math.min(feel.kickDegrees * 0.35, 1.2)
+	local kick = base * CFrame.Angles(math.rad(-feel.kickDegrees), 0, math.rad(yawJitter))
 	weld.C0 = kick
-	task.delay(0.05, function()
+	task.delay(0.055, function()
 		if weld and weld.Parent then
 			weld.C0 = base
 		end
@@ -159,8 +199,8 @@ local function toolKick(character: Model, feel: WeaponAudio.FireFeel)
 	if character == localPlayer.Character then
 		local cam = Workspace.CurrentCamera
 		if cam then
-			-- Mild camera punch; kickDegrees already tuned down for playtest.
-			local punch = CFrame.Angles(math.rad(-feel.kickDegrees * 0.2), 0, 0)
+			-- Camera punch scales with per-gun kick; keep mild vs tool kick.
+			local punch = CFrame.Angles(math.rad(-feel.kickDegrees * 0.18), 0, 0)
 			cam.CFrame = cam.CFrame * punch
 		end
 	end
@@ -197,4 +237,4 @@ weaponFired.OnClientEvent:Connect(function(payload)
 	end
 end)
 
-print("[WeaponFxController] Tracers · muzzle · kick · class fire sounds ready.")
+print("[WeaponFxController] Per-gun kick · punchy SFX · bold tracers ready.")

@@ -44,6 +44,11 @@ function WeaponVisuals.visualClass(def: WeaponDefs.WeaponDef): VisualClass
 	return "Assault"
 end
 
+function WeaponVisuals.isSniperWeapon(weaponId: string): boolean
+	local def = WeaponDefs.get(weaponId)
+	return def ~= nil and WeaponVisuals.visualClass(def) == "Sniper"
+end
+
 local function makePart(
 	name: string,
 	size: Vector3,
@@ -355,12 +360,29 @@ function WeaponVisuals.buildModel(weaponId: string): Model?
 	return model
 end
 
+--[[
+	R15 RightHand ready/aim grip.
+	Previous Angles(-90,0,0) aligned muzzle with the forearm so the gun dangled
+	at the hip. Model space is +Z muzzle / +Y up; rotate onto the hand's tool
+	axis so the barrel sits chest-high and points character-forward.
+]]
 function WeaponVisuals.handAttachCFrame(def: WeaponDefs.WeaponDef): CFrame
 	local class = WeaponVisuals.visualClass(def)
+	-- Yaw -90, roll -90: muzzle along hand look / character forward in idle.
+	local orient = CFrame.Angles(0, math.rad(-90), math.rad(-90))
 	if class == "Pistol" then
-		return CFrame.new(0, -0.15, -0.2) * CFrame.Angles(math.rad(-90), 0, 0)
+		return CFrame.new(0.02, -0.02, -0.08) * orient * CFrame.Angles(math.rad(8), 0, 0)
+	elseif class == "SMG" then
+		return CFrame.new(0.06, -0.06, -0.14) * orient * CFrame.Angles(math.rad(4), 0, 0)
+	elseif class == "Shotgun" then
+		return CFrame.new(0.08, -0.1, -0.2) * orient * CFrame.Angles(math.rad(2), 0, 0)
+	elseif class == "LMG" then
+		return CFrame.new(0.1, -0.12, -0.22) * orient * CFrame.Angles(math.rad(0), 0, 0)
+	elseif class == "Sniper" then
+		return CFrame.new(0.08, -0.1, -0.2) * orient * CFrame.Angles(math.rad(2), 0, 0)
 	end
-	return CFrame.new(0, -0.2, -0.35) * CFrame.Angles(math.rad(-90), 0, 0)
+	-- Assault
+	return CFrame.new(0.08, -0.08, -0.18) * orient * CFrame.Angles(math.rad(3), 0, 0)
 end
 
 function WeaponVisuals.clearFromCharacter(character: Model)
