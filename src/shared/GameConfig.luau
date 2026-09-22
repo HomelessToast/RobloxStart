@@ -26,12 +26,15 @@ local GameConfig = {
 	SprintSpeed = 22,
 	WalkSpeed = 16,
 
-	-- Greybox layout (studs). Straight-line targets approximating §7.4 path distances.
+	-- Greybox layout. Anchor world positions live in MapMetrics; path ribbons
+	-- encode §7.4 distances. Capture duration × sprint = contest radius R=660 —
+	-- changing either invalidates MapMetrics and requires a map rebuild.
 	Map = {
-		SafeHouseSeparation = 800, -- ~770 straight-line ≈ 1000 path with friction
-		HouseHalfSeparation = 400,
-		GoodSpawnZ = -480,
-		TerroristSpawnZ = 40,
+		-- Straight-line A↔B (~770); path ribbon A_to_B targets ~1000 (950–1100).
+		SafeHouseSeparation = 770,
+		HouseHalfSeparation = 385,
+		GoodSpawnZ = -500, -- Motorcade
+		TerroristSpawnZ = -50, -- Market Crossroads
 		FloorY = 0,
 		CaptureSize = Vector3.new(48, 24, 48),
 		HouseInteriorSize = Vector3.new(56, 20, 56),

@@ -41,8 +41,8 @@
         "$properties": {
           "Anchored": true,
           "Locked": true,
-          "Size": [1200, 2, 900],
-          "Position": [0, -1, -100],
+          "Size": [1000, 2, 800],
+          "Position": [0, -1, -180],
           "Color": [0.22, 0.23, 0.24],
           "Material": "Asphalt",
           "TopSurface": "Smooth",
@@ -57,7 +57,7 @@
           "Enabled": false,
           "Transparency": 1,
           "Size": [12, 1, 12],
-          "Position": [0, 0.5, -480],
+          "Position": [0, 0.5, -500],
           "TopSurface": "Smooth",
           "BottomSurface": "Smooth"
         }

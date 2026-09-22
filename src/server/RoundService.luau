@@ -256,6 +256,8 @@ end
 
 function RoundService.init()
 	MapService.build()
+	local MapValidator = require(script.Parent.MapValidator)
+	MapValidator.runAndPrint()
 	CaptureService.setRoundRemainingGetter(function()
 		return timeRemaining
 	end)
