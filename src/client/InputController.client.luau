@@ -1,12 +1,14 @@
 --!strict
 -- Fire, sprint (Shift), and dodge (Q) intents. Server owns stamina / cooldown / WalkSpeed.
--- Client mirrors sprint with a real run AnimationTrack (not WalkSpeed alone).
+-- Client mirrors sprint with a run AnimationTrack and dodge with a procedural forward-roll
+-- AnimationTrack (HRP stays upright on the server — no camera tumble).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
+local KeyframeSequenceProvider = game:GetService("KeyframeSequenceProvider")
 
 local GameConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("GameConfig"))
 local Net = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Net"))
@@ -29,6 +31,11 @@ local serverDodging = false
 local sprintTrack: AnimationTrack? = nil
 local sprintTrackRig: Enum.HumanoidRigType? = nil
 local sprintAnimCharacter: Model? = nil
+
+local rollTrack: AnimationTrack? = nil
+local rollTrackRig: Enum.HumanoidRigType? = nil
+local rollAnimCharacter: Model? = nil
+local rollAnimId: string? = nil
 
 local function currentCamera(): Camera?
 	return Workspace.CurrentCamera
@@ -76,6 +83,13 @@ local function stopSprintAnim(fade: number?)
 	end
 end
 
+local function stopRollAnim(fade: number?)
+	local track = rollTrack
+	if track and track.IsPlaying then
+		track:Stop(fade or 0.08)
+	end
+end
+
 local function ensureSprintTrack(humanoid: Humanoid): AnimationTrack?
 	local character = humanoid.Parent
 	if typeof(character) ~= "Instance" or not character:IsA("Model") then
@@ -118,6 +132,128 @@ local function ensureSprintTrack(humanoid: Humanoid): AnimationTrack?
 	track.Looped = true
 	sprintTrack = track
 	return track
+end
+
+local function addPose(parent: Instance, name: string, cf: CFrame, weight: number): Pose
+	local pose = Instance.new("Pose")
+	pose.Name = name
+	pose.CFrame = cf
+	pose.Weight = weight
+	pose.Parent = parent
+	return pose
+end
+
+--- Build a one-shot forward somersault KeyframeSequence (R15 LowerTorso / R6 Torso).
+--- Registered locally so we do not depend on a catalog Animation asset.
+local function buildRollKeyframeSequence(rig: Enum.HumanoidRigType): KeyframeSequence
+	local seq = Instance.new("KeyframeSequence")
+	seq.Loop = false
+	seq.Priority = Enum.AnimationPriority.Action4
+
+	local steps = 12
+	local length = 0.5
+	for i = 0, steps do
+		local alpha = i / steps
+		local pitch = -alpha * math.pi * 2
+		local tuck = math.sin(alpha * math.pi) -- peak mid-roll
+
+		local kf = Instance.new("Keyframe")
+		kf.Time = alpha * length
+		kf.Name = string.format("roll_%02d", i)
+
+		local rootPose = addPose(kf, "HumanoidRootPart", CFrame.identity, 1)
+
+		if rig == Enum.HumanoidRigType.R6 then
+			local torso = addPose(rootPose, "Torso", CFrame.Angles(pitch, 0, 0), 1)
+			addPose(torso, "Left Arm", CFrame.Angles(-0.4 - 0.5 * tuck, 0, 0.7 * tuck), 0.9)
+			addPose(torso, "Right Arm", CFrame.Angles(-0.4 - 0.5 * tuck, 0, -0.7 * tuck), 0.9)
+			addPose(torso, "Left Leg", CFrame.Angles(-0.9 * tuck, 0, 0), 0.9)
+			addPose(torso, "Right Leg", CFrame.Angles(-0.9 * tuck, 0, 0), 0.9)
+			addPose(torso, "Head", CFrame.Angles(0.25 * tuck, 0, 0), 0.7)
+		else
+			local lower = addPose(rootPose, "LowerTorso", CFrame.Angles(pitch, 0, 0), 1)
+			addPose(lower, "LeftUpperLeg", CFrame.Angles(-1.0 * tuck, 0.1 * tuck, 0), 0.95)
+			addPose(lower, "RightUpperLeg", CFrame.Angles(-1.0 * tuck, -0.1 * tuck, 0), 0.95)
+			local upper = addPose(lower, "UpperTorso", CFrame.Angles(-0.2 * tuck, 0, 0), 1)
+			addPose(upper, "LeftUpperArm", CFrame.Angles(-0.5 - 0.4 * tuck, 0, 0.8 * tuck), 0.95)
+			addPose(upper, "RightUpperArm", CFrame.Angles(-0.5 - 0.4 * tuck, 0, -0.8 * tuck), 0.95)
+			addPose(upper, "Head", CFrame.Angles(0.35 * tuck, 0, 0), 0.75)
+		end
+
+		kf.Parent = seq
+	end
+
+	return seq
+end
+
+local function ensureRollTrack(humanoid: Humanoid): AnimationTrack?
+	local character = humanoid.Parent
+	if typeof(character) ~= "Instance" or not character:IsA("Model") then
+		return nil
+	end
+
+	local animator = humanoid:FindFirstChildOfClass("Animator")
+	if not animator then
+		animator = Instance.new("Animator")
+		animator.Parent = humanoid
+	end
+
+	local rig = humanoid.RigType
+	if rollTrack and rollAnimCharacter == character and rollTrackRig == rig then
+		return rollTrack
+	end
+
+	stopRollAnim(0)
+	rollTrack = nil
+	rollTrackRig = rig
+	rollAnimCharacter = character
+	rollAnimId = nil
+
+	local seq = buildRollKeyframeSequence(rig)
+	local okReg, idOrErr = pcall(function()
+		return KeyframeSequenceProvider:RegisterKeyframeSequence(seq)
+	end)
+	seq:Destroy()
+	if not okReg or typeof(idOrErr) ~= "string" then
+		warn("[InputController] Failed to register dodge roll sequence:", idOrErr)
+		return nil
+	end
+
+	rollAnimId = idOrErr :: string
+	local anim = Instance.new("Animation")
+	anim.AnimationId = rollAnimId
+
+	local ok, trackOrErr = pcall(function()
+		return animator:LoadAnimation(anim)
+	end)
+	anim:Destroy()
+	if not ok or typeof(trackOrErr) ~= "Instance" then
+		warn("[InputController] Failed to load dodge roll animation:", trackOrErr)
+		return nil
+	end
+
+	local track = trackOrErr :: AnimationTrack
+	track.Priority = Enum.AnimationPriority.Action4
+	track.Looped = false
+	rollTrack = track
+	return track
+end
+
+local function playRollAnim(humanoid: Humanoid)
+	stopSprintAnim(0.05)
+	local track = ensureRollTrack(humanoid)
+	if not track then
+		return
+	end
+	local duration = GameConfig.Dodge.Duration
+	local length = track.Length
+	if length <= 0.05 then
+		-- Length can be 0 until the track is fully loaded; play at 1× and hope.
+		track:Play(0.05, 1, 1)
+		return
+	end
+	local speed = length / duration
+	track:Play(0.05, 1, speed)
 end
 
 local function updateSprintAnim()
@@ -237,9 +373,14 @@ end)
 
 localPlayer.CharacterAdded:Connect(function()
 	stopSprintAnim(0)
+	stopRollAnim(0)
 	sprintTrack = nil
 	sprintTrackRig = nil
 	sprintAnimCharacter = nil
+	rollTrack = nil
+	rollTrackRig = nil
+	rollAnimCharacter = nil
+	rollAnimId = nil
 	serverSprinting = false
 	serverDodging = false
 end)
@@ -263,9 +404,22 @@ remotes:WaitForChild(Net.MovementState).OnClientEvent:Connect(function(payload)
 	if typeof(payload.sprinting) == "boolean" then
 		serverSprinting = payload.sprinting
 	end
+
+	local wasDodging = serverDodging
 	if typeof(payload.dodging) == "boolean" then
 		serverDodging = payload.dodging
 	end
+
+	if serverDodging and not wasDodging then
+		local character = localPlayer.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if humanoid and humanoid.Health > 0 then
+			playRollAnim(humanoid)
+		end
+	elseif wasDodging and not serverDodging then
+		stopRollAnim(0.1)
+	end
+
 	-- If server dropped our sprint (empty stamina), clear local hold intent mirror.
 	if payload.sprinting == false and holdingSprint and typeof(payload.stamina) == "number" then
 		if payload.stamina <= 0 then
@@ -276,4 +430,4 @@ remotes:WaitForChild(Net.MovementState).OnClientEvent:Connect(function(payload)
 	updateSprintAnim()
 end)
 
-print("[InputController] LMB fire · Shift sprint (run anim) · Q dodge (server-authoritative).")
+print("[InputController] LMB fire · Shift sprint (run anim) · Q dodge (animated upright roll).")

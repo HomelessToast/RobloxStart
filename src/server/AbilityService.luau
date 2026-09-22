@@ -3,12 +3,12 @@
 	Sprint stamina + Q dodge/roll for every character.
 
 	Client sends SprintIntent / DodgeRequest; server owns stamina, cooldown,
-	WalkSpeed, and the roll. Dodge is a locked forward somersault: travel
-	direction is fixed at activation (MoveDirection, else facing), horizontal
-	velocity stays aligned to that axis, and orientation is rebuilt each frame
-	as pitch about Right (not a cumulative local spin). Design §5.3 originally
-	reserved the roll for the President — this slice unifies Q dodge for all
-	roles with the same numbers (see docs/vip-movement.md).
+	WalkSpeed, and the roll travel. Dodge keeps HumanoidRootPart upright
+	(AlignOrientation) and slides on a locked flat axis (LinearVelocity) —
+	never Physics-state CFrame pitching (that caused fling / random facing /
+	camera desync). Client plays the somersault AnimationTrack from
+	MovementState.dodging. Design §5.3 originally reserved the roll for the
+	President — this slice unifies Q dodge for all roles (see docs/vip-movement.md).
 ]]
 
 local Players = game:GetService("Players")
@@ -32,6 +32,11 @@ type Runtime = {
 	dodgeUntil: number,
 	recoveryUntil: number,
 	dodgeConn: RBXScriptConnection?,
+	dodgeAttachment: Attachment?,
+	dodgeVelocity: LinearVelocity?,
+	dodgeAlign: AlignOrientation?,
+	savedJumpPower: number?,
+	savedJumpHeight: number?,
 	lastPush: number,
 	lastStaminaSent: number,
 	lastCooldownSent: number,
@@ -66,6 +71,11 @@ local function getRuntime(player: Player): Runtime
 			dodgeUntil = 0,
 			recoveryUntil = 0,
 			dodgeConn = nil,
+			dodgeAttachment = nil,
+			dodgeVelocity = nil,
+			dodgeAlign = nil,
+			savedJumpPower = nil,
+			savedJumpHeight = nil,
 			lastPush = 0,
 			lastStaminaSent = -1,
 			lastCooldownSent = -1,
@@ -142,6 +152,27 @@ local function clearDodgeConn(rt: Runtime)
 	end
 end
 
+local function destroyDodgeConstraints(rt: Runtime)
+	if rt.dodgeVelocity then
+		rt.dodgeVelocity:Destroy()
+		rt.dodgeVelocity = nil
+	end
+	if rt.dodgeAlign then
+		rt.dodgeAlign:Destroy()
+		rt.dodgeAlign = nil
+	end
+	if rt.dodgeAttachment then
+		rt.dodgeAttachment:Destroy()
+		rt.dodgeAttachment = nil
+	end
+end
+
+local function setDodgeRagdollGuards(humanoid: Humanoid, enabled: boolean)
+	humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, enabled)
+	humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, enabled)
+	humanoid:SetStateEnabled(Enum.HumanoidStateType.Physics, enabled)
+end
+
 local function restoreHumanoidAfterDodge(
 	_player: Player,
 	humanoid: Humanoid,
@@ -152,23 +183,38 @@ local function restoreHumanoidAfterDodge(
 	humanoid.PlatformStand = false
 	humanoid.JumpPower = savedJumpPower
 	humanoid.JumpHeight = savedJumpHeight
-	-- Leave Physics / freefall and let the humanoid settle upright.
+	setDodgeRagdollGuards(humanoid, true)
 	if humanoid.Health > 0 then
-		humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+		-- Stay in locomotion — do not GettingUp (that was for Physics tumbles).
+		humanoid:ChangeState(Enum.HumanoidStateType.Running)
 	end
 end
 
 local function stopDodge(player: Player, rt: Runtime)
 	clearDodgeConn(rt)
+	destroyDodgeConstraints(rt)
 	rt.dodgeUntil = 0
 	local character = player.Character
 	if character then
 		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		if root then
+			root.AssemblyAngularVelocity = Vector3.zero
+		end
 		if humanoid then
 			humanoid.AutoRotate = true
 			humanoid.PlatformStand = false
+			setDodgeRagdollGuards(humanoid, true)
+			if rt.savedJumpPower ~= nil then
+				humanoid.JumpPower = rt.savedJumpPower
+			end
+			if rt.savedJumpHeight ~= nil then
+				humanoid.JumpHeight = rt.savedJumpHeight
+			end
 		end
 	end
+	rt.savedJumpPower = nil
+	rt.savedJumpHeight = nil
 end
 
 --- Flat forward unit from move intent, else facing. Nil if neither is usable.
@@ -185,14 +231,12 @@ local function resolveDodgeFlat(humanoid: Humanoid, root: BasePart): Vector3?
 	return flat.Unit
 end
 
---- World orientation facing `flat`, pitched forward by `pitch` radians (full roll = 2π).
-local function rollCFrame(position: Vector3, flat: Vector3, pitch: number): CFrame
-	local facing = CFrame.lookAt(position, position + flat)
-	return facing * CFrame.Angles(-pitch, 0, 0)
-end
-
 local function uprightCFrame(position: Vector3, flat: Vector3): CFrame
 	return CFrame.lookAt(position, position + flat)
+end
+
+local function facingCFrame(flat: Vector3): CFrame
+	return CFrame.lookAt(Vector3.zero, flat)
 end
 
 function AbilityService.cancelSprint(player: Player)
@@ -349,27 +393,68 @@ function AbilityService.handleDodgeRequest(player: Player, _payload: any)
 
 	local dodge = cfgDodge()
 	local speed = dodge.Distance / dodge.Duration
-	-- Drop any prior roll connection without clearing the new dodgeUntil window.
+	-- Drop any prior roll without clearing the new dodgeUntil window.
 	clearDodgeConn(rt)
+	destroyDodgeConstraints(rt)
 	rt.dodgeCooldown = t + dodge.CooldownSeconds
 	rt.dodgeUntil = t + dodge.Duration
 	rt.recoveryUntil = t + dodge.Duration + dodge.RecoverySeconds
 
 	local savedJumpPower = humanoid.JumpPower
 	local savedJumpHeight = humanoid.JumpHeight
+	rt.savedJumpPower = savedJumpPower
+	rt.savedJumpHeight = savedJumpHeight
 
 	humanoid.AutoRotate = false
 	humanoid.WalkSpeed = 0
 	humanoid.JumpPower = 0
 	humanoid.JumpHeight = 0
-	-- Physics state: humanoid stops fighting orientation; we drive a locked forward roll.
-	humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+	humanoid.PlatformStand = false
+	setDodgeRagdollGuards(humanoid, false)
 
-	-- Snap upright on the travel axis before the pitch roll starts.
+	-- Keep locomotion state — do NOT enter Physics (that was the fling/desync path).
+	if
+		humanoid:GetState() == Enum.HumanoidStateType.Physics
+		or humanoid:GetState() == Enum.HumanoidStateType.Ragdoll
+		or humanoid:GetState() == Enum.HumanoidStateType.FallingDown
+	then
+		humanoid:ChangeState(Enum.HumanoidStateType.Running)
+	end
+
+	-- Snap upright on the travel axis; zero spin so AlignOrientation starts clean.
 	root.AssemblyAngularVelocity = Vector3.zero
 	root.CFrame = uprightCFrame(root.Position, flat)
-	local startVelY = math.clamp(root.AssemblyLinearVelocity.Y, -8, 4)
+	local startVelY = math.clamp(root.AssemblyLinearVelocity.Y, -6, 2)
 	root.AssemblyLinearVelocity = Vector3.new(flat.X * speed, startVelY, flat.Z * speed)
+
+	local attachment = Instance.new("Attachment")
+	attachment.Name = "VIPDodgeAttachment"
+	attachment.Parent = root
+	rt.dodgeAttachment = attachment
+
+	local align = Instance.new("AlignOrientation")
+	align.Name = "VIPDodgeAlign"
+	align.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	align.Attachment0 = attachment
+	align.RigidityEnabled = true
+	align.CFrame = facingCFrame(flat)
+	align.Parent = root
+	rt.dodgeAlign = align
+
+	local mass = math.max(root.AssemblyMass, 1)
+	local maxAxis = mass * dodge.MaxForcePerMass
+	local linear = Instance.new("LinearVelocity")
+	linear.Name = "VIPDodgeVelocity"
+	linear.Attachment0 = attachment
+	linear.RelativeTo = Enum.ActuatorRelativeTo.World
+	linear.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+	linear.VectorVelocity = Vector3.new(flat.X * speed, 0, flat.Z * speed)
+	linear.ForceLimitsEnabled = true
+	linear.ForceLimitMode = Enum.ForceLimitMode.PerAxis
+	-- Finite XZ force, zero Y ⇒ gravity/ground normal untouched; walls don't sky-fling.
+	linear.MaxAxesForce = Vector3.new(maxAxis, 0, maxAxis)
+	linear.Parent = root
+	rt.dodgeVelocity = linear
 
 	local elapsed = 0
 	local finished = false
@@ -389,33 +474,36 @@ function AbilityService.handleDodgeRequest(player: Player, _payload: any)
 		if done then
 			finished = true
 			clearDodgeConn(rt)
+			destroyDodgeConstraints(rt)
 			rt.dodgeUntil = 0
 			if stillRoot and stillHum and stillHum.Health > 0 then
-				-- Land upright facing the roll direction; soft handoff velocity.
 				stillRoot.AssemblyAngularVelocity = Vector3.zero
 				stillRoot.CFrame = uprightCFrame(stillRoot.Position, flat)
 				local landSpeed = GameConfig.WalkSpeed
-				local vy = math.clamp(stillRoot.AssemblyLinearVelocity.Y, -12, 6)
+				local vy = math.clamp(stillRoot.AssemblyLinearVelocity.Y, -10, 4)
 				stillRoot.AssemblyLinearVelocity =
 					Vector3.new(flat.X * landSpeed, vy, flat.Z * landSpeed)
 				restoreHumanoidAfterDodge(player, stillHum, savedJumpPower, savedJumpHeight)
+				rt.savedJumpPower = nil
+				rt.savedJumpHeight = nil
 				applyWalkSpeed(player, rt)
 			elseif stillHum then
 				restoreHumanoidAfterDodge(player, stillHum, savedJumpPower, savedJumpHeight)
+				rt.savedJumpPower = nil
+				rt.savedJumpHeight = nil
 			end
 			AbilityService.push(player, true)
 			return
 		end
 
-		-- Locked horizontal travel + one full forward somersault (pitch about Right).
-		-- Rebuild orientation from the locked facing each frame — never accumulate
-		-- local spins (that was the random fling).
-		local alpha = math.clamp(elapsed / dodge.Duration, 0, 1)
-		local pitch = alpha * math.pi * 2
-		local velY = math.clamp(stillRoot.AssemblyLinearVelocity.Y, -16, 6)
+		-- Keep angular velocity crushed; LinearVelocity + AlignOrientation own the rest.
 		stillRoot.AssemblyAngularVelocity = Vector3.zero
-		stillRoot.AssemblyLinearVelocity = Vector3.new(flat.X * speed, velY, flat.Z * speed)
-		stillRoot.CFrame = rollCFrame(stillRoot.Position, flat, pitch)
+		if
+			stillHum:GetState() == Enum.HumanoidStateType.Physics
+			or stillHum:GetState() == Enum.HumanoidStateType.Ragdoll
+		then
+			stillHum:ChangeState(Enum.HumanoidStateType.Running)
+		end
 	end)
 
 	AbilityService.push(player, true)
