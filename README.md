@@ -148,8 +148,9 @@ rojo build default.project.json --output build/game.rbxl
 11. **Disconnect:** stop the President client mid-round → Terrorists win.
 12. **Deadline:** after the timer drops below 0:30, entering a house shows `TOO LATE`
     and does not start capture; banner switches to `ELIMINATE`.
-13. Spot-check: no lethal falls on stair/rooftop approaches; chokes have neon bypass
-    markers; arcade near Motorcade provides overhead cover.
+13. Spot-check: no lethal falls on stair/rooftop approaches; alleys act as
+    costly bypasses vs primary roads; Market mid-avenue has one LOS island only
+    (no floating choke slabs / arcade / MidCover barriers in the street).
 
 ## Lint / build
 

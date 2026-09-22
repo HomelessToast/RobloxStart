@@ -32,9 +32,9 @@
 	- Spawn pool illumination at Motorcade + Market
 	Does not move anchors, LOS blocker, perimeter, or sniper ladders.
 
-	Also: MapAnchor tags, CaptureBoundary markers, costly choke bypasses,
-	tall city perimeter walls, discrete TrussPart ladder climbs onto selected
-	roofs (no rooftop highway), overhead arcade, no lethal VIP falls.
+	Also: MapAnchor tags, CaptureBoundary markers, alley bypasses (not
+	floating street walls), tall city perimeter walls, discrete TrussPart
+	ladder climbs onto selected roofs (no rooftop highway), no lethal VIP falls.
 	RoadNetwork / spawn LOS owned elsewhere — do not reshape those here.
 ]]
 
@@ -72,7 +72,6 @@ local COLOR = {
 	terror = Color3.fromRGB(200, 70, 60),
 	glass = Color3.fromRGB(140, 190, 220),
 	path = Color3.fromRGB(180, 160, 60),
-	choke = Color3.fromRGB(80, 80, 85),
 	plaza = Color3.fromRGB(130, 128, 118),
 	planter = Color3.fromRGB(70, 88, 62),
 	vehicle = Color3.fromRGB(45, 48, 55),
@@ -933,14 +932,6 @@ local function inRect(
 	return math.abs(px - cx) <= halfW and math.abs(pz - cz) <= halfD
 end
 
-local function streetCover(parent: Folder, x: number, z: number, name: string, yaw: number?)
-	local cf = CFrame.new(x, MapMetrics.FloorY + 2.5, z)
-	if yaw then
-		cf *= CFrame.Angles(0, yaw, 0)
-	end
-	part(parent, name, Vector3.new(8, 5, 3), cf, COLOR.cover)
-end
-
 --[[
 	Intentional skyline mix (stable hash so rebuilds match). Not uniform towers.
 	Buckets (~studs):
@@ -1471,10 +1462,6 @@ local function buildUrbanMassing(parent: Folder)
 	blocksFolder.Name = "CityBlocks"
 	blocksFolder.Parent = massing
 
-	local lanesFolder = Instance.new("Folder")
-	lanesFolder.Name = "LanesAndChokes"
-	lanesFolder.Parent = massing
-
 	local roadsFolder = Instance.new("Folder")
 	roadsFolder.Name = "RoadNetwork"
 	roadsFolder.Parent = massing
@@ -1696,6 +1683,11 @@ local function buildUrbanMassing(parent: Folder)
 	-- Spawn stays on the road at (0, -50); this island sits south
 	-- of it on X=0 so the round-start stare is blocked. Players
 	-- flank via adjacent N–S streets — not a wall of buildings.
+	--
+	-- No legacy LanesAndChokes props here: canal/boulevard choke
+	-- slabs, mid-avenue arcade, and MidCover/lane cover barriers
+	-- were arbitrary street walls left over from pre-grid massing.
+	-- City blocks + ortho roads + alleys already define lanes.
 	----------------------------------------------------------------
 	do
 		local losH = 72
@@ -1710,109 +1702,6 @@ local function buildUrbanMassing(parent: Folder)
 			COLOR.concrete,
 			Enum.Material.Concrete
 		)
-	end
-
-	----------------------------------------------------------------
-	-- Chokes / arcade / street cover on primary avenues (not open fields)
-	----------------------------------------------------------------
-	part(
-		lanesFolder,
-		"CanalBridgeChokeL",
-		Vector3.new(34, 28, 24),
-		CFrame.new(-28, floorY + 14, -300),
-		COLOR.choke
-	)
-	part(
-		lanesFolder,
-		"CanalBridgeChokeR",
-		Vector3.new(34, 28, 24),
-		CFrame.new(28, floorY + 14, -300),
-		COLOR.choke
-	)
-	part(
-		lanesFolder,
-		"CanalDeck",
-		Vector3.new(22, 1, 28),
-		CFrame.new(0, floorY + 0.5, -300),
-		COLOR.asphalt,
-		Enum.Material.Asphalt
-	)
-
-	part(
-		lanesFolder,
-		"WestLaneChokeL",
-		Vector3.new(22, 30, 18),
-		CFrame.new(-130, floorY + 15, -300),
-		COLOR.choke
-	)
-	part(
-		lanesFolder,
-		"WestLaneChokeR",
-		Vector3.new(22, 30, 18),
-		CFrame.new(-70, floorY + 15, -300),
-		COLOR.choke
-	)
-	part(
-		lanesFolder,
-		"EastLaneChokeL",
-		Vector3.new(22, 30, 18),
-		CFrame.new(70, floorY + 15, -300),
-		COLOR.choke
-	)
-	part(
-		lanesFolder,
-		"EastLaneChokeR",
-		Vector3.new(22, 30, 18),
-		CFrame.new(130, floorY + 15, -300),
-		COLOR.choke
-	)
-
-	part(
-		lanesFolder,
-		"SouthBlvdChokeW",
-		Vector3.new(28, 36, 20),
-		CFrame.new(-200, floorY + 18, -280),
-		COLOR.choke
-	)
-	part(
-		lanesFolder,
-		"SouthBlvdChokeE",
-		Vector3.new(28, 36, 20),
-		CFrame.new(200, floorY + 18, -280),
-		COLOR.choke
-	)
-
-	for i = -3, 3 do
-		part(
-			lanesFolder,
-			"ArcadePillar" .. i,
-			Vector3.new(3, 14, 3),
-			CFrame.new(i * 12, floorY + 7, -340),
-			COLOR.concrete
-		)
-	end
-	part(
-		lanesFolder,
-		"ArcadeRoof",
-		Vector3.new(88, 2, 22),
-		CFrame.new(0, floorY + 15, -340),
-		COLOR.metal,
-		Enum.Material.Metal
-	)
-
-	for i = 1, 8 do
-		local z = -480 + i * 50
-		streetCover(lanesFolder, -12, z, "MidCoverL" .. i)
-		streetCover(lanesFolder, 12, z, "MidCoverR" .. i)
-	end
-	for i = 1, 5 do
-		local t = i / 6
-		local ax = goodToA[1].X + (goodToA[#goodToA].X - goodToA[1].X) * t
-		local az = goodToA[1].Z + (goodToA[#goodToA].Z - goodToA[1].Z) * t
-		local bx = goodToB[1].X + (goodToB[#goodToB].X - goodToB[1].X) * t
-		local bz = goodToB[1].Z + (goodToB[#goodToB].Z - goodToB[1].Z) * t
-		streetCover(lanesFolder, ax + 10, az, "WestLaneCover" .. i, 0.4)
-		streetCover(lanesFolder, bx - 10, bz, "EastLaneCover" .. i, -0.4)
 	end
 end
 
