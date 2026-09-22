@@ -14,6 +14,7 @@ local GameConfig = require(ReplicatedStorage.Shared.GameConfig)
 local Enums = require(ReplicatedStorage.Shared.Enums)
 local TeamService = require(script.Parent.TeamService)
 local CaptureService = require(script.Parent.CaptureService)
+local MatchService = require(script.Parent.MatchService)
 
 local ObjectiveService = {}
 
@@ -53,6 +54,19 @@ local function livingOnSide(side: string): number
 end
 
 function ObjectiveService.evaluate(roundRemaining: number): Resolution?
+	-- TEMP: debug solo playtest — empty enemy / missing President must not end the round.
+	-- Timer still resolves so a stuck LIVE eventually returns to lobby.
+	if MatchService.isDebugSolo() then
+		if roundRemaining <= 0 then
+			return {
+				winnerSide = Enums.Side.Terrorist,
+				reason = Enums.RoundEndReason.TimerExpired,
+				message = "DEBUG solo timer expired",
+			}
+		end
+		return nil
+	end
+
 	-- 1. President death
 	if presidentDied then
 		local extra = if killerOfPresident

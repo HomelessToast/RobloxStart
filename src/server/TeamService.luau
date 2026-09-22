@@ -69,6 +69,24 @@ function TeamService.assignForRound(_players: { Player })
 	end
 end
 
+--[[
+	TEMP debug solo playtest seating.
+	Puts everyone on one side as shooters (bodyguard / terrorist) — no President —
+	so Loadout can grant a primary and ObjectiveService can suppress empty-team wins.
+]]
+function TeamService.assignDebugSolo(players: { Player }, side: string)
+	TeamService.reset()
+	local role = if side == Enums.Side.Good then Enums.Role.Bodyguard else Enums.Role.Terrorist
+	for _, player in players do
+		assignments[player] = {
+			side = side,
+			role = role,
+			teamId = "A",
+		}
+	end
+	president = nil
+end
+
 function TeamService.getAssignment(player: Player): Assignment
 	return assignments[player]
 		or {

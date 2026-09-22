@@ -43,6 +43,25 @@ local GameConfig = {
 		SpawnLocalOffset = Vector3.new(0, 0, 14), -- south edge of deck (arrive outside pads)
 	},
 
+	--[[
+		TEMP / DEV-ONLY — solo playtest pad on the lobby deck.
+		Matthew: walk onto it to skip matchmaking and jump into LIVE with a gun.
+		Kill-switch: set Enabled = false (pad is not built; RoundService ignores it).
+		Remove this block + LobbyService debug builders + RoundService debug start for prod.
+	]]
+	Debug = {
+		SoloPlaytestPadEnabled = true,
+		-- North edge of deck (toward city), in the center gap between Day/Night pads.
+		ZoneLocalOffset = Vector3.new(0, 0, -17),
+		ZoneSize = Vector3.new(10, 12, 10),
+		-- Usable primary for movement + gunplay (not President pistol-lock).
+		DefaultWeaponId = "M4A1",
+		-- Lighting for the debug match (does not arm Day/Night ready pads).
+		LobbyMode = "Night",
+		-- Seat as Good bodyguard so M4A1 is legal; no President / empty-team auto-wins.
+		Side = "Good",
+	},
+
 	-- Combat
 	FriendlyFire = false,
 	StartingHealth = 100,

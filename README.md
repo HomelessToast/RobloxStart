@@ -33,6 +33,12 @@ round 1 seats A=Good / B=Terrorist, then sides swap every round. Between rounds 
 returns to the armed ready pad for intermission, then auto-continues. After a team reaches
 4 wins, match end clears the scoreboard for a fresh queue.
 
+**TEMP — debug solo pad:** magenta **DEBUG START / SOLO TEST** pad on the north edge of
+the lobby deck (toward the city). Walk onto it with one player to skip matchmaking and
+jump straight into `LIVE` with an **M4A1**. Kill-switch: `GameConfig.Debug.SoloPlaytestPadEnabled`
+(set `false` or delete the `Debug` block + `DEBUG_*` lobby builders). Does not affect
+Day/Night pads, buy economy, or production round flow when unused.
+
 ### President assignment
 
 - If only **one** player is on the Good/VIP side, they are President.

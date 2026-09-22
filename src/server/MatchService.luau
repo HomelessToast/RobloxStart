@@ -30,6 +30,8 @@ local teamB: { Player } = {}
 local prezCursorA = 1
 local prezCursorB = 1
 local lobbyMode: string? = nil -- "Day" | "Night"
+-- TEMP: set by RoundService debug solo pad; cleared in reset().
+local debugSolo = false
 
 local function sortByUserId(list: { Player }): { Player }
 	table.sort(list, function(a, b)
@@ -59,10 +61,20 @@ function MatchService.reset()
 	prezCursorA = 1
 	prezCursorB = 1
 	lobbyMode = nil
+	debugSolo = false
 end
 
 function MatchService.isActive(): boolean
 	return matchActive
+end
+
+--- TEMP debug solo playtest — empty enemy team must not auto-end the round.
+function MatchService.isDebugSolo(): boolean
+	return debugSolo
+end
+
+function MatchService.setDebugSolo(enabled: boolean)
+	debugSolo = enabled
 end
 
 function MatchService.getRoundIndex(): number

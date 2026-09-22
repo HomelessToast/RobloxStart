@@ -18,6 +18,7 @@ local RunService = game:GetService("RunService")
 local GameConfig = require(ReplicatedStorage.Shared.GameConfig)
 local Enums = require(ReplicatedStorage.Shared.Enums)
 local Net = require(ReplicatedStorage.Shared.Net)
+local WeaponDefs = require(ReplicatedStorage.Shared.WeaponDefs)
 
 local Remotes = require(script.Parent.Remotes)
 local MapService = require(script.Parent.MapService)
@@ -81,12 +82,16 @@ local function broadcastRound()
 				maxN
 			)
 		else
+			local debugHint = if GameConfig.Debug.SoloPlaytestPadEnabled
+				then " · or DEBUG pad (solo)"
+				else ""
 			banner = string.format(
-				"Stand in DAY or NIGHT ready pad · Night %d  Day %d  (need %d–%d)",
+				"Stand in DAY or NIGHT ready pad · Night %d  Day %d  (need %d–%d)%s",
 				nightN,
 				dayN,
 				minN,
-				maxN
+				maxN,
+				debugHint
 			)
 		end
 	elseif state == Enums.RoundState.Buy then
@@ -476,6 +481,77 @@ local function startMatchFromLobby(mode: LobbyService.LobbyMode, players: { Play
 	beginBuy()
 end
 
+--[[
+	TEMP debug solo playtest — walk-on pad in LobbyService.
+	Skips min-player / buy phase, grants Debug.DefaultWeaponId, suppresses empty-team wins.
+	Remove with GameConfig.Debug + LobbyService DEBUG_* builders.
+]]
+local function prepareDebugPlayers(players: { Player })
+	for _, player in players do
+		if not player.Character then
+			respawnPlayer(player)
+		end
+	end
+	task.wait(0.5)
+	PlayerStateService.resetAllArmor()
+	LoadoutService.clear()
+	local weaponId = GameConfig.Debug.DefaultWeaponId
+	local def = WeaponDefs.get(weaponId)
+	assert(def, "[RoundService] Debug.DefaultWeaponId missing: " .. tostring(weaponId))
+	for _, player in players do
+		if player.Character then
+			local teamId = TeamService.getTeamId(player)
+			if teamId then
+				EconomyService.setTeam(player, teamId)
+			end
+			PlayerStateService.resetArmor(player)
+			SpawnService.prepareCharacter(player)
+			LoadoutService.equipWeapon(player, def)
+			SpawnService.setFrozen(player, false)
+			WeaponService.pushPlayerState(player)
+			EconomyService.push(player)
+		end
+	end
+end
+
+local function startDebugSoloFromLobby(players: { Player })
+	transitioning = true
+	ending = false
+	lastAnnouncement = nil
+	ObjectiveService.resetFlags()
+	WeaponService.reset()
+	CaptureService.reset()
+	CombatService.setRoundLive(false)
+	BuyService.setOpen(false)
+	AbilityService.interruptAll()
+
+	local modeRaw = GameConfig.Debug.LobbyMode
+	local mode: LobbyService.LobbyMode = if modeRaw == "Day" then "Day" else "Night"
+
+	MatchService.beginMatch(players, mode)
+	MatchService.setDebugSolo(true)
+	if not MatchService.beginNextRound() then
+		MatchService.reset()
+		transitioning = false
+		return
+	end
+	pendingMode = nil
+	lobbyCountdown = 0
+
+	TeamService.assignDebugSolo(players, GameConfig.Debug.Side)
+	LobbyService.applyMatchLighting(mode)
+	prepareDebugPlayers(players)
+
+	announce(
+		string.format(
+			"DEBUG SOLO LIVE — %s · walk off pad next time to use Day/Night",
+			GameConfig.Debug.DefaultWeaponId
+		),
+		"warning"
+	)
+	beginLive()
+end
+
 local function pickArmedZone(): (LobbyService.LobbyMode?, { Player })
 	local minN = GameConfig.MinPlayersToStart
 	local nightPlayers = LobbyService.getPlayersInZone("Night")
@@ -519,6 +595,21 @@ function RoundService.step(dt: number)
 		-- Ignore pad arming while a match is somehow still marked active.
 		if MatchService.isActive() then
 			MatchService.reset()
+		end
+
+		-- TEMP: magenta DEBUG pad — solo-friendly immediate LIVE (does not touch Day/Night).
+		if GameConfig.Debug.SoloPlaytestPadEnabled then
+			local debugPlayers = LobbyService.getPlayersInDebugZone()
+			if #debugPlayers >= 1 then
+				pendingMode = nil
+				lobbyCountdown = 0
+				timeRemaining = 0
+				transitioning = true
+				task.spawn(function()
+					startDebugSoloFromLobby(debugPlayers)
+				end)
+				return
+			end
 		end
 
 		local mode, _ = pickArmedZone()

@@ -27,6 +27,8 @@ local lobbyFolder: Folder? = nil
 local nightZone: BasePart? = nil
 local dayZone: BasePart? = nil
 local spawnPad: BasePart? = nil
+-- TEMP debug solo pad (nil when GameConfig.Debug.SoloPlaytestPadEnabled is false).
+local debugZone: BasePart? = nil
 
 local COLOR = {
 	deck = Color3.fromRGB(72, 74, 80),
@@ -41,6 +43,10 @@ local COLOR = {
 	dayGlow = Color3.fromRGB(255, 220, 120),
 	sign = Color3.fromRGB(230, 232, 238),
 	warn = Color3.fromRGB(200, 160, 60),
+	-- Ugly on purpose — must not look like a real game feature.
+	debugFloor = Color3.fromRGB(220, 40, 160),
+	debugGlow = Color3.fromRGB(255, 80, 200),
+	debugWarn = Color3.fromRGB(255, 240, 60),
 }
 
 type LightingPreset = {
@@ -251,6 +257,94 @@ local function buildReadyZone(
 	return volume
 end
 
+--[[
+	TEMP / DEV-ONLY walk-on pad. Magenta + WARNING labels so it never reads as
+	Day/Night matchmaking. Gated by GameConfig.Debug.SoloPlaytestPadEnabled.
+]]
+local function buildDebugSoloPad(parent: Folder): BasePart
+	local cfg = GameConfig.Lobby
+	local debug = GameConfig.Debug
+	local top = deckTopY()
+	local localOffset = debug.ZoneLocalOffset
+	local zoneSize = debug.ZoneSize
+
+	local floor = part(
+		parent,
+		"DEBUG_SoloFloor",
+		Vector3.new(zoneSize.X, 0.45, zoneSize.Z),
+		CFrame.new(cfg.Center.X + localOffset.X, top + 0.28, cfg.Center.Z + localOffset.Z),
+		COLOR.debugFloor,
+		Enum.Material.Neon
+	)
+
+	local volume = part(
+		parent,
+		"DEBUG_SoloZone",
+		zoneSize,
+		CFrame.new(
+			cfg.Center.X + localOffset.X,
+			top + zoneSize.Y * 0.5,
+			cfg.Center.Z + localOffset.Z
+		),
+		COLOR.debugGlow,
+		Enum.Material.ForceField,
+		false
+	)
+	volume.Transparency = 0.65
+	volume.CanQuery = true
+	volume:SetAttribute("DEBUG_SoloPlaytest", true)
+	CollectionService:AddTag(volume, "DEBUG_SoloPlaytestPad")
+
+	local sign = part(
+		parent,
+		"DEBUG_SoloSign",
+		Vector3.new(14, 4.5, 0.6),
+		CFrame.new(cfg.Center.X + localOffset.X, top + 10, cfg.Center.Z + localOffset.Z - 6),
+		COLOR.console,
+		Enum.Material.SmoothPlastic
+	)
+	billboard(sign, "DEBUG START  ·  SOLO TEST", 3.5, COLOR.debugWarn)
+	billboard(floor, "DEV ONLY — NOT A REAL MATCH", 5.5, COLOR.debugGlow)
+
+	-- Hazard stripes so it never looks like Day/Night chrome.
+	for i = -1, 1 do
+		part(
+			parent,
+			"DEBUG_Stripe" .. i,
+			Vector3.new(2, 0.5, zoneSize.Z - 1),
+			CFrame.new(
+				cfg.Center.X + localOffset.X + i * 2.8,
+				top + 0.4,
+				cfg.Center.Z + localOffset.Z
+			),
+			if i % 2 == 0 then COLOR.debugWarn else COLOR.debugFloor,
+			Enum.Material.Neon,
+			false
+		).CanCollide =
+			false
+	end
+
+	local lamp = part(
+		parent,
+		"DEBUG_Overhead",
+		Vector3.new(5, 0.6, 5),
+		CFrame.new(cfg.Center.X + localOffset.X, top + 13, cfg.Center.Z + localOffset.Z),
+		COLOR.debugGlow,
+		Enum.Material.Neon,
+		false
+	)
+	lamp.CanCollide = false
+	local light = Instance.new("PointLight")
+	light.Range = 26
+	light.Brightness = 2.4
+	light.Color = COLOR.debugGlow
+	light.Shadows = false
+	light.Parent = lamp
+
+	floor.Parent = parent
+	return volume
+end
+
 local function buildRails(parent: Folder)
 	local cfg = GameConfig.Lobby
 	local top = deckTopY()
@@ -447,6 +541,28 @@ function LobbyService.takeMatchRoster(mode: LobbyMode): { Player }
 	return roster
 end
 
+function LobbyService.getDebugZone(): BasePart?
+	return debugZone
+end
+
+function LobbyService.getPlayersInDebugZone(): { Player }
+	if not debugZone then
+		return {}
+	end
+	local found: { Player } = {}
+	for _, player in Players:GetPlayers() do
+		local character = player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		if root and MapService.pointInPart(root.Position, debugZone) then
+			table.insert(found, player)
+		end
+	end
+	table.sort(found, function(a, b)
+		return a.UserId < b.UserId
+	end)
+	return found
+end
+
 function LobbyService.build()
 	local existing = Workspace:FindFirstChild("VIPLobby")
 	if existing then
@@ -458,6 +574,7 @@ function LobbyService.build()
 	folder.Name = "VIPLobby"
 	folder.Parent = Workspace
 	lobbyFolder = folder
+	debugZone = nil
 
 	part(
 		folder,
@@ -484,6 +601,11 @@ function LobbyService.build()
 		buildReadyZone(folder, "Night", cfg.NightZoneLocalOffset, COLOR.nightFloor, COLOR.nightGlow)
 	dayZone = buildReadyZone(folder, "Day", cfg.DayZoneLocalOffset, COLOR.dayFloor, COLOR.dayGlow)
 	buildProps(folder)
+
+	-- TEMP: magenta solo playtest pad (north edge). Easy kill-switch in GameConfig.Debug.
+	if GameConfig.Debug.SoloPlaytestPadEnabled then
+		debugZone = buildDebugSoloPad(folder)
+	end
 
 	-- Arrival pad (south) — default SpawnLocation sits here.
 	local spawnOffset = cfg.SpawnLocalOffset
@@ -512,8 +634,9 @@ function LobbyService.build()
 
 	print(
 		string.format(
-			"[LobbyService] VIP briefing deck at %s (Night west / Day east ready pads).",
-			tostring(cfg.Center)
+			"[LobbyService] VIP briefing deck at %s (Night west / Day east ready pads%s).",
+			tostring(cfg.Center),
+			if debugZone then "; DEBUG solo pad north" else ""
 		)
 	)
 	return folder
