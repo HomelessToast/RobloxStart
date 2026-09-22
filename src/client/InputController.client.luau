@@ -19,6 +19,7 @@ local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local fireShot = remotes:WaitForChild(Net.FireShot) :: RemoteEvent
 local sprintIntent = remotes:WaitForChild(Net.SprintIntent) :: RemoteEvent
 local dodgeRequest = remotes:WaitForChild(Net.DodgeRequest) :: RemoteEvent
+local reloadRequest = remotes:WaitForChild(Net.ReloadRequest) :: RemoteEvent
 
 local holdingFire = false
 local holdingSprint = false
@@ -330,6 +331,10 @@ local function isDodgeKey(input: InputObject): boolean
 	return input.KeyCode == Enum.KeyCode.Q or input.KeyCode == Enum.KeyCode.ButtonB
 end
 
+local function isReloadKey(input: InputObject): boolean
+	return input.KeyCode == Enum.KeyCode.R or input.KeyCode == Enum.KeyCode.ButtonX
+end
+
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then
 		return
@@ -344,6 +349,10 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if isSprintKey(input) then
 		holdingSprint = true
 		sendSprint(true)
+		return
+	end
+	if isReloadKey(input) then
+		reloadRequest:FireServer({})
 		return
 	end
 	if isDodgeKey(input) then
@@ -431,4 +440,4 @@ remotes:WaitForChild(Net.MovementState).OnClientEvent:Connect(function(payload)
 	updateSprintAnim()
 end)
 
-print("[InputController] LMB fire · Shift sprint (run anim) · Q dodge (animated upright roll).")
+print("[InputController] LMB fire · R reload · Shift sprint · Q dodge.")

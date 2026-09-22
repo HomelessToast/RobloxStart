@@ -26,7 +26,16 @@ export type PurchaseResult =
 	| "PRESIDENT_PRIMARY_LOCKED"
 	| "UNKNOWN_ITEM"
 	| "ALREADY_OWNED"
+	| "HOTBAR_FULL"
 	| "DEAD"
+
+export type HotbarSlotPayload = {
+	slot: number,
+	weaponId: string,
+	weaponName: string,
+	ammo: number,
+	reserve: number,
+}
 
 export type RoundSnapshot = {
 	state: RoundState,
@@ -75,6 +84,9 @@ export type PlayerStatePayload = {
 	armorMax: number,
 	hasHelmet: boolean,
 	buyOpen: boolean,
+	hotbar: { HotbarSlotPayload }?,
+	activeSlot: number?,
+	reloading: boolean?,
 }
 
 export type MovementStatePayload = {

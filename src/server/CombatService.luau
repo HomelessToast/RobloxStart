@@ -2,7 +2,7 @@
 -- Server-authoritative hits. Client reports intent; server raycasts and applies damage.
 -- Friendly fire is off: same-side damage is discarded before it reaches the armor pool.
 -- No weapon pickups from corpses — LoadoutService is the only grant path.
--- Broadcasts WeaponFired for client tracers / muzzle / sounds.
+-- Broadcasts WeaponFired for client bullet VFX / muzzle / sounds.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")

@@ -395,10 +395,11 @@ remotes:WaitForChild(Net.PlayerState).OnClientEvent:Connect(function(payload)
 		armorLabel.Text = "Armor —"
 	end
 	ammoLabel.Text = string.format(
-		"%s  %d / %d",
+		"%s  %d / %d%s",
 		tostring(payload.weaponName or ""),
 		payload.ammo or 0,
-		payload.reserve or 0
+		payload.reserve or 0,
+		if payload.reloading == true then "  RELOAD" else ""
 	)
 
 	if not playerAlive then

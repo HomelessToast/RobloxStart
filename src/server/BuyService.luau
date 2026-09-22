@@ -1,6 +1,6 @@
 --!strict
 -- Purchase gate 1 of 2. Validates cash, side, BUY phase, and President pistol lock.
--- Gate 2 is WeaponService.equip / LoadoutService.grantPurchased.
+-- Multiple guns allowed during BUY — each purchase adds a hotbar slot (no auto-replace).
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -76,29 +76,43 @@ function BuyService.purchaseWeapon(player: Player, weaponId: string): string
 		return Enums.PurchaseResult.PresidentPrimaryLocked
 	end
 
-	local loadout = LoadoutService.get(player)
-	if loadout and loadout.weaponId == weaponId then
-		reply(player, Enums.PurchaseResult.AlreadyOwned, weaponId, "Already equipped")
+	if LoadoutService.owns(player, weaponId) then
+		reply(player, Enums.PurchaseResult.AlreadyOwned, weaponId, "Already in hotbar")
 		return Enums.PurchaseResult.AlreadyOwned
 	end
 
-	-- Free P0 always allowed; paid guns charge the difference vs current paid gun
-	-- (full price — no trade-in credit in v1; refunds are full until BUY ends via rebuy).
+	if LoadoutService.slotCount(player) >= LoadoutService.maxSlots() then
+		reply(
+			player,
+			Enums.PurchaseResult.HotbarFull,
+			weaponId,
+			string.format("Hotbar full (%d)", LoadoutService.maxSlots())
+		)
+		return Enums.PurchaseResult.HotbarFull
+	end
+
 	local price = def.price
 	if price > 0 and not EconomyService.trySpend(player, price) then
 		reply(player, Enums.PurchaseResult.CannotAfford, weaponId, "Not enough cash")
 		return Enums.PurchaseResult.CannotAfford
 	end
 
-	-- Refund previous paid weapon if replacing during BUY
-	if loadout then
-		local prev = WeaponDefs.get(loadout.weaponId)
-		if prev and prev.price > 0 and prev.id ~= weaponId then
-			EconomyService.refund(player, prev.price)
+	local _, err = LoadoutService.addWeapon(player, def)
+	if err == "full" then
+		if price > 0 then
+			EconomyService.refund(player, price)
 		end
+		reply(player, Enums.PurchaseResult.HotbarFull, weaponId, "Hotbar full")
+		return Enums.PurchaseResult.HotbarFull
+	end
+	if err == "owned" then
+		if price > 0 then
+			EconomyService.refund(player, price)
+		end
+		reply(player, Enums.PurchaseResult.AlreadyOwned, weaponId, "Already in hotbar")
+		return Enums.PurchaseResult.AlreadyOwned
 	end
 
-	LoadoutService.equipWeapon(player, def)
 	reply(player, Enums.PurchaseResult.Ok, weaponId, "Purchased " .. def.displayName)
 	return Enums.PurchaseResult.Ok
 end

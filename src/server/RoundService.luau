@@ -34,6 +34,8 @@ local EconomyService = require(script.Parent.EconomyService)
 local BuyService = require(script.Parent.BuyService)
 local PlayerStateService = require(script.Parent.PlayerStateService)
 local AbilityService = require(script.Parent.AbilityService)
+local AppearanceService = require(script.Parent.AppearanceService)
+local WeaponVisuals = require(ReplicatedStorage.Shared.WeaponVisuals)
 
 local RoundService = {}
 
@@ -154,12 +156,35 @@ local function pushAllPlayerStates()
 	end
 end
 
+--[[
+	Matthew: guns + role skins despawn after each round.
+	Clears hotbar/ammo/visuals and restores default avatar before lobby /
+	intermission. BUY re-grants via prepareBuyPlayers.
+]]
+local function stripRoundGear(players: { Player }?)
+	local list = players or Players:GetPlayers()
+	LoadoutService.clear()
+	WeaponService.reset()
+	for _, player in list do
+		local character = player.Character
+		if character then
+			WeaponVisuals.clearFromCharacter(character)
+			character:SetAttribute("Side", Enums.Side.Spectator)
+			character:SetAttribute("Role", Enums.Role.Unassigned)
+			character:SetAttribute("WeaponId", "")
+		end
+		AppearanceService.restoreAvatar(player)
+		WeaponService.pushPlayerState(player)
+	end
+end
+
 local function respawnPlayer(player: Player)
 	player:LoadCharacter()
 end
 
 -- Yielding teleports run off Heartbeat so the round clock never stalls mid-step.
 local function teleportRosterToLobbyPad(mode: LobbyService.LobbyMode?)
+	stripRoundGear()
 	task.spawn(function()
 		for _, player in Players:GetPlayers() do
 			if not player.Character then
@@ -170,6 +195,11 @@ local function teleportRosterToLobbyPad(mode: LobbyService.LobbyMode?)
 		for _, player in Players:GetPlayers() do
 			SpawnService.setFrozen(player, false)
 			SpawnService.teleportToReadyPad(player, mode)
+			-- teleportToReadyPad restores avatar again; ensure no leftover gun weld.
+			if player.Character then
+				WeaponVisuals.clearFromCharacter(player.Character)
+			end
+			WeaponService.pushPlayerState(player)
 		end
 	end)
 end
@@ -179,6 +209,7 @@ local function returnEveryoneToLobbySpawn()
 	pendingMode = nil
 	lobbyCountdown = 0
 	BuyService.setOpen(false)
+	stripRoundGear()
 	task.spawn(function()
 		for _, player in Players:GetPlayers() do
 			if not player.Character then
@@ -189,6 +220,10 @@ local function returnEveryoneToLobbySpawn()
 		for _, player in Players:GetPlayers() do
 			SpawnService.setFrozen(player, false)
 			SpawnService.teleportToLobby(player)
+			if player.Character then
+				WeaponVisuals.clearFromCharacter(player.Character)
+			end
+			WeaponService.pushPlayerState(player)
 		end
 	end)
 end
@@ -297,6 +332,8 @@ local function enterRoundEnd(resolution: ObjectiveService.Resolution)
 	BuyService.setOpen(false)
 	CaptureService.stopMonitoring()
 	unfreezeRoster()
+	-- Strip guns/skins immediately so they don't linger into lobby pad time.
+	stripRoundGear(MatchService.getRoster())
 	timeRemaining = GameConfig.RoundEndSeconds
 	lastResolution = resolution
 
@@ -804,6 +841,7 @@ function RoundService.init()
 	CaptureService.init()
 	CombatService.init()
 	BuyService.init()
+	WeaponService.init()
 	WeaponService.setBuyOpenGetter(function()
 		return BuyService.isOpen()
 	end)

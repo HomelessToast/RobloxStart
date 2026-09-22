@@ -54,6 +54,7 @@ Enums.PurchaseResult = {
 	PresidentPrimaryLocked = "PRESIDENT_PRIMARY_LOCKED",
 	UnknownItem = "UNKNOWN_ITEM",
 	AlreadyOwned = "ALREADY_OWNED",
+	HotbarFull = "HOTBAR_FULL",
 	Dead = "DEAD",
 }
 

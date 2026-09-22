@@ -361,28 +361,67 @@ function WeaponVisuals.buildModel(weaponId: string): Model?
 end
 
 --[[
-	R15 RightHand ready/aim grip.
-	Previous Angles(-90,0,0) aligned muzzle with the forearm so the gun dangled
-	at the hip. Model space is +Z muzzle / +Y up; rotate onto the hand's tool
-	axis so the barrel sits chest-high and points character-forward.
+	R15 RightHand grip for a raised ready/aim arm (WeaponHoldController).
+	Model space: +Z muzzle, +Y up, Handle at grip.
+	With the arm raised forward, this seats the grip in the palm and points
+	the barrel character-forward — not hanging at the hip.
 ]]
 function WeaponVisuals.handAttachCFrame(def: WeaponDefs.WeaponDef): CFrame
 	local class = WeaponVisuals.visualClass(def)
-	-- Yaw -90, roll -90: muzzle along hand look / character forward in idle.
-	local orient = CFrame.Angles(0, math.rad(-90), math.rad(-90))
+	-- Hand local → gun: pitch so +Z (muzzle) exits along fingers/forward.
+	local orient = CFrame.Angles(math.rad(-90), math.rad(180), 0)
 	if class == "Pistol" then
-		return CFrame.new(0.02, -0.02, -0.08) * orient * CFrame.Angles(math.rad(8), 0, 0)
+		return CFrame.new(0, -0.12, -0.05) * orient * CFrame.Angles(math.rad(6), math.rad(-4), 0)
 	elseif class == "SMG" then
-		return CFrame.new(0.06, -0.06, -0.14) * orient * CFrame.Angles(math.rad(4), 0, 0)
+		return CFrame.new(0.02, -0.14, -0.08) * orient * CFrame.Angles(math.rad(4), math.rad(-2), 0)
 	elseif class == "Shotgun" then
-		return CFrame.new(0.08, -0.1, -0.2) * orient * CFrame.Angles(math.rad(2), 0, 0)
+		return CFrame.new(0.04, -0.16, -0.1) * orient * CFrame.Angles(math.rad(2), 0, 0)
 	elseif class == "LMG" then
-		return CFrame.new(0.1, -0.12, -0.22) * orient * CFrame.Angles(math.rad(0), 0, 0)
+		return CFrame.new(0.05, -0.18, -0.12) * orient * CFrame.Angles(math.rad(0), 0, 0)
 	elseif class == "Sniper" then
-		return CFrame.new(0.08, -0.1, -0.2) * orient * CFrame.Angles(math.rad(2), 0, 0)
+		return CFrame.new(0.04, -0.16, -0.1) * orient * CFrame.Angles(math.rad(2), 0, 0)
 	end
 	-- Assault
-	return CFrame.new(0.08, -0.08, -0.18) * orient * CFrame.Angles(math.rad(3), 0, 0)
+	return CFrame.new(0.03, -0.15, -0.09) * orient * CFrame.Angles(math.rad(3), math.rad(-2), 0)
+end
+
+export type ArmMotors = {
+	RightShoulder: Motor6D?,
+	RightElbow: Motor6D?,
+	RightWrist: Motor6D?,
+}
+
+--- RightShoulder / RightElbow / RightWrist Motor6Ds when present (R15).
+function WeaponVisuals.findArmMotors(character: Model): ArmMotors
+	local found: ArmMotors = {
+		RightShoulder = nil,
+		RightElbow = nil,
+		RightWrist = nil,
+	}
+	for _, d in character:GetDescendants() do
+		if d:IsA("Motor6D") then
+			local name = d.Name
+			if name == "RightShoulder" then
+				found.RightShoulder = d
+			elseif name == "RightElbow" then
+				found.RightElbow = d
+			elseif name == "RightWrist" then
+				found.RightWrist = d
+			end
+		end
+	end
+	return found
+end
+
+--[[
+	Ready/aim Transform overrides (applied after Animate on Stepped).
+	Raises the right arm so the welded gun sits chest-high, not at the hip.
+]]
+function WeaponVisuals.readyArmTransforms(): (CFrame, CFrame, CFrame)
+	local shoulder = CFrame.Angles(math.rad(-95), math.rad(25), math.rad(15))
+	local elbow = CFrame.Angles(math.rad(-25), 0, math.rad(-8))
+	local wrist = CFrame.Angles(math.rad(12), math.rad(-5), math.rad(5))
+	return shoulder, elbow, wrist
 end
 
 function WeaponVisuals.clearFromCharacter(character: Model)

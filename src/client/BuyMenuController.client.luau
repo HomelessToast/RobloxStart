@@ -61,7 +61,7 @@ title.Parent = panel
 local timerLabel = Instance.new("TextLabel")
 timerLabel.BackgroundTransparency = 1
 timerLabel.Size = UDim2.fromOffset(120, 36)
-timerLabel.Position = UDim2.new(1, -300, 0, 12)
+timerLabel.Position = UDim2.new(1, -340, 0, 12)
 timerLabel.Font = Enum.Font.GothamBold
 timerLabel.TextSize = 22
 timerLabel.TextColor3 = Color3.fromRGB(255, 200, 90)
@@ -72,13 +72,31 @@ timerLabel.Parent = panel
 local cashLabel = Instance.new("TextLabel")
 cashLabel.BackgroundTransparency = 1
 cashLabel.Size = UDim2.fromOffset(140, 36)
-cashLabel.Position = UDim2.new(1, -156, 0, 12)
+cashLabel.Position = UDim2.new(1, -200, 0, 12)
 cashLabel.Font = Enum.Font.GothamBold
 cashLabel.TextSize = 22
 cashLabel.TextColor3 = Color3.fromRGB(120, 220, 140)
 cashLabel.TextXAlignment = Enum.TextXAlignment.Right
 cashLabel.Text = "$0"
 cashLabel.Parent = panel
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Name = "CloseX"
+closeBtn.AnchorPoint = Vector2.new(1, 0)
+closeBtn.Position = UDim2.new(1, -12, 0, 10)
+closeBtn.Size = UDim2.fromOffset(36, 36)
+closeBtn.BackgroundColor3 = Color3.fromRGB(50, 28, 32)
+closeBtn.BorderSizePixel = 0
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 20
+closeBtn.TextColor3 = Color3.fromRGB(255, 210, 210)
+closeBtn.Text = "X"
+closeBtn.AutoButtonColor = true
+closeBtn.Parent = panel
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 8)
+closeCorner.Parent = closeBtn
 
 local hint = Instance.new("TextLabel")
 hint.BackgroundTransparency = 1
@@ -89,7 +107,7 @@ hint.TextSize = 13
 hint.TextColor3 = Color3.fromRGB(160, 168, 185)
 hint.TextXAlignment = Enum.TextXAlignment.Left
 hint.Text =
-	"Click a card to buy · B toggles menu · President is pistol-only · Full refund on replace until LIVE"
+	"Click a card to buy · X toggles menu · multiple guns go to hotbar (1–5) · President pistol-only"
 hint.Parent = panel
 
 local scroll = Instance.new("ScrollingFrame")
@@ -124,6 +142,10 @@ local function setMenuVisible(visible: boolean)
 	menuVisible = visible and buyOpen
 	gui.Enabled = menuVisible
 end
+
+closeBtn.MouseButton1Click:Connect(function()
+	setMenuVisible(false)
+end)
 
 local function clearCards()
 	for _, child in scroll:GetChildren() do
@@ -358,7 +380,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then
 		return
 	end
-	if input.KeyCode == Enum.KeyCode.B and buyOpen then
+	if input.KeyCode == Enum.KeyCode.X and buyOpen then
 		setMenuVisible(not menuVisible)
 		if menuVisible then
 			rebuild()
@@ -366,4 +388,10 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	end
 end)
 
-print("[BuyMenuController] 30s buy menu with picture cards ready (B to toggle).")
+closeBtn.MouseButton1Click:Connect(function()
+	if buyOpen then
+		setMenuVisible(false)
+	end
+end)
+
+print("[BuyMenuController] 30s buy menu with picture cards ready (X to toggle).")

@@ -46,6 +46,9 @@ function WeaponService.canFire(player: Player): boolean
 	then
 		return false
 	end
+	if LoadoutService.isReloading(player) then
+		return false
+	end
 	-- Sprint and dodge/recovery block fire (design §5.3 / movement model).
 	if not AbilityService.canFire(player) then
 		return false
@@ -72,8 +75,27 @@ function WeaponService.tryConsumeShot(player: Player): boolean
 	return true
 end
 
+local function hotbarPayload(player: Player): { any }
+	local inv = LoadoutService.getInventory(player)
+	local list = {}
+	if not inv then
+		return list
+	end
+	for i, slot in inv.slots do
+		table.insert(list, {
+			slot = i,
+			weaponId = slot.weaponId,
+			weaponName = slot.weaponName,
+			ammo = slot.ammo,
+			reserve = slot.reserve,
+		})
+	end
+	return list
+end
+
 function WeaponService.pushPlayerState(player: Player)
 	local loadout = LoadoutService.get(player)
+	local inv = LoadoutService.getInventory(player)
 	local assignment = TeamService.getAssignment(player)
 	local armor = PlayerStateService.getArmor(player)
 	Remotes.get(Net.PlayerState):FireClient(player, {
@@ -89,7 +111,51 @@ function WeaponService.pushPlayerState(player: Player)
 		armorMax = armor.maxPool,
 		hasHelmet = armor.hasHelmet,
 		buyOpen = if buyOpenGetter then buyOpenGetter() else false,
+		hotbar = hotbarPayload(player),
+		activeSlot = if inv then inv.activeIndex else 1,
+		reloading = LoadoutService.isReloading(player),
 	})
+end
+
+function WeaponService.handleSelectWeapon(player: Player, payload: any)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	local slot = payload.slot
+	if typeof(slot) ~= "number" then
+		return
+	end
+	local index = math.floor(slot)
+	if LoadoutService.selectSlot(player, index) then
+		WeaponService.pushPlayerState(player)
+	end
+end
+
+function WeaponService.handleReload(player: Player)
+	if not TeamService.hasLivingBody(player) then
+		return
+	end
+	if LoadoutService.beginReload(player) then
+		WeaponService.pushPlayerState(player)
+		local def = LoadoutService.getDef(player)
+		local duration = if def then math.max(0.35, def.reloadTime) else 1.5
+		task.delay(duration + 0.05, function()
+			if player.Parent then
+				WeaponService.pushPlayerState(player)
+			end
+		end)
+	else
+		WeaponService.pushPlayerState(player)
+	end
+end
+
+function WeaponService.init()
+	Remotes.get(Net.SelectWeapon).OnServerEvent:Connect(function(player, payload)
+		WeaponService.handleSelectWeapon(player, payload)
+	end)
+	Remotes.get(Net.ReloadRequest).OnServerEvent:Connect(function(player, _payload)
+		WeaponService.handleReload(player)
+	end)
 end
 
 function WeaponService.reset()
