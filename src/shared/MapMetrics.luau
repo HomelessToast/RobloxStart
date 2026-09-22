@@ -13,6 +13,11 @@
 	  Terror spawn → each house ~500
 	  Dual-contest midfield around Market
 
+	Layout philosophy: dense urban grid + CS2/Valorant pathing. Ribbons mark
+	the few meaningful lanes (Motorcade → mid → each house, plus A↔B arterial).
+	MapService carves only those corridors (and costly alley bypasses) out of
+	solid city blocks — no large empty plazas between routes.
+
 	Rebuild the map when CaptureDuration or SprintSpeed change — those
 	define R and invalidate this blockout (see GameConfig / design §7.2).
 ]]

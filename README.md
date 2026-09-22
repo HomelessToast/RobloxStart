@@ -57,8 +57,21 @@ southern arterial). Contest radius **R = 22 × 30 = 660**. Yellow neon
 `CaptureBoundary` marks each volume; `MapAnchor` tags name Motorcade / Market /
 Consulate / Precinct.
 
-Art is colored Parts only — modular dress is deferred until these metrics pass
-playtest.
+### Layout philosophy (dense grid + tactical lanes)
+
+Metric distances above are unchanged. The greybox **massing** is a dense city
+grid: solid building blocks fill the footprint; only named street/alley corridors
+are carved open (path ribbons + costly bypass alleys + two crossovers).
+
+Think **city blocks × Inferno/Mirage lanes**, not open-field traversal:
+
+- Three macro routes Motorcade → houses (west / mid / east), pinched by smokeable chokes
+- Every choke has a **longer/narrower** alley bypass (neon markers) — expensive, not free
+- Market mid is a pinched hub, not a plaza you can freely cross
+- Elevations exist as gapped rooftop vantages; roofs are not a rotate highway
+
+Art is still colored Parts only — modular dress is deferred until these metrics
+pass playtest.
 
 ## Local setup
 

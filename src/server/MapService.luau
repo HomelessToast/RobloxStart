@@ -2,15 +2,16 @@
 --[[
 	Builds the metric-correct urban greybox from MapMetrics.
 
+	Layout philosophy (Matthew feedback): dense city grid + CS2/Valorant lanes —
+	few meaningful routes with chokepoints that matter; no large empty plazas.
+	Metric ribbons in MapMetrics stay the distance source of truth.
+
 	Gameplay wiring (unchanged contracts):
 	- Workspace.VIPMap / SafeHouseA|B / CaptureVolume (+ SafeHouseId attribute)
 	- MapService.getCaptureVolume / getSpawnCFrame / pointInPart
 
-	New for §7 / world-gen:
-	- CollectionService tag MapAnchor + Role / Id / SafeHouseId attributes
-	- Visible CaptureBoundary markers
-	- Chokes with bypass corridors, elevated vantages, overhead arcade
-	- No lethal falls on President routes (stairs / low decks only)
+	Also: MapAnchor tags, CaptureBoundary markers, costly choke bypasses,
+	elevated vantages (gapped roofs), overhead arcade, no lethal VIP falls.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
@@ -404,14 +405,66 @@ local function vantageBuilding(
 	)
 end
 
-local function streetCover(parent: Folder, x: number, z: number, name: string)
-	part(
-		parent,
-		name,
-		Vector3.new(12, 5, 4),
-		CFrame.new(x, MapMetrics.FloorY + 2.5, z),
-		COLOR.cover
-	)
+--[[
+	Dense city grid + CS2/Valorant lane philosophy:
+	- Fill the footprint with building blocks; carve only named street/alley corridors.
+	- Few meaningful routes Motorcade → mid → each house (not open-field plazas).
+	- Every choke has a bypass that is longer/narrower (costly), never a free highway.
+	- Rooftops stay gapped (vantage buildings elsewhere); no continuous roof rotate.
+]]
+
+local function distPointToSegment2D(
+	px: number,
+	pz: number,
+	ax: number,
+	az: number,
+	bx: number,
+	bz: number
+): number
+	local abx = bx - ax
+	local abz = bz - az
+	local apx = px - ax
+	local apz = pz - az
+	local abLenSq = abx * abx + abz * abz
+	if abLenSq < 1e-6 then
+		return math.sqrt(apx * apx + apz * apz)
+	end
+	local t = math.clamp((apx * abx + apz * abz) / abLenSq, 0, 1)
+	local qx = ax + abx * t
+	local qz = az + abz * t
+	local dx = px - qx
+	local dz = pz - qz
+	return math.sqrt(dx * dx + dz * dz)
+end
+
+local function nearPolyline(px: number, pz: number, points: { Vector3 }, halfWidth: number): boolean
+	for i = 1, #points - 1 do
+		local a = points[i]
+		local b = points[i + 1]
+		if distPointToSegment2D(px, pz, a.X, a.Z, b.X, b.Z) <= halfWidth then
+			return true
+		end
+	end
+	return false
+end
+
+local function inRect(
+	px: number,
+	pz: number,
+	cx: number,
+	cz: number,
+	halfW: number,
+	halfD: number
+): boolean
+	return math.abs(px - cx) <= halfW and math.abs(pz - cz) <= halfD
+end
+
+local function streetCover(parent: Folder, x: number, z: number, name: string, yaw: number?)
+	local cf = CFrame.new(x, MapMetrics.FloorY + 2.5, z)
+	if yaw then
+		cf *= CFrame.Angles(0, yaw, 0)
+	end
+	part(parent, name, Vector3.new(10, 5, 3.5), cf, COLOR.cover)
 end
 
 local function buildUrbanMassing(parent: Folder)
@@ -420,157 +473,320 @@ local function buildUrbanMassing(parent: Folder)
 	massing.Name = "UrbanMassing"
 	massing.Parent = parent
 
-	-- Central plaza mass: forces A↔B to take the southern arterial (path ribbon).
+	local blocksFolder = Instance.new("Folder")
+	blocksFolder.Name = "CityBlocks"
+	blocksFolder.Parent = massing
+
+	local lanesFolder = Instance.new("Folder")
+	lanesFolder.Name = "LanesAndChokes"
+	lanesFolder.Parent = massing
+
+	-- Primary tactical lanes (half-widths). Path ribbons stay the measurement source;
+	-- these corridors are the playable carve so free plaza crossing is gone.
+	local laneHalf = {
+		primary = 13, -- ~26 stud street (smokeable choke width)
+		approach = 12,
+		arterial = 14, -- southern A↔B boulevard
+		alley = 7, -- costly bypass (~14 studs)
+		crossover = 10,
+	}
+
+	local paths = MapMetrics.Paths
+	local goodToA = paths.Good_to_A.points
+	local goodToB = paths.Good_to_B.points
+	local terrorToA = paths.Terror_to_A.points
+	local terrorToB = paths.Terror_to_B.points
+	local aToB = paths.A_to_B.points
+	local midLane = paths.Good_to_Terror.points
+
+	-- Extra orthogonal connectors / costly alleys (not primary measurement ribbons).
+	local westBypass = {
+		Vector3.new(-220, 0, -480),
+		Vector3.new(-220, 0, -300),
+		Vector3.new(-220, 0, -160),
+		Vector3.new(-300, 0, -80),
+		Vector3.new(-340, 0, -20),
+	}
+	local eastBypass = {
+		Vector3.new(220, 0, -480),
+		Vector3.new(220, 0, -300),
+		Vector3.new(220, 0, -160),
+		Vector3.new(300, 0, -80),
+		Vector3.new(340, 0, -20),
+	}
+	local earlyCrossover = {
+		Vector3.new(-120, 0, -380),
+		Vector3.new(0, 0, -380),
+		Vector3.new(120, 0, -380),
+	}
+	local lateCrossover = {
+		Vector3.new(-160, 0, -160),
+		Vector3.new(0, 0, -160),
+		Vector3.new(160, 0, -160),
+	}
+	-- Northern pocket link (Market → house approaches without open field)
+	local northLink = {
+		Vector3.new(-200, 0, 100),
+		Vector3.new(0, 0, 100),
+		Vector3.new(200, 0, 100),
+	}
+
+	local clearPads = {
+		{ x = 0, z = -500, hw = 28, hd = 28 }, -- Motorcade
+		{ x = 0, z = -50, hw = 30, hd = 30 }, -- Market
+		{ x = -385, z = 0, hw = 48, hd = 42 }, -- Consulate yard
+		{ x = 385, z = 0, hw = 48, hd = 42 }, -- Precinct yard
+		-- Vantage footprints (buildings placed after massing)
+		{ x = -150, z = -260, hw = 28, hd = 26 },
+		{ x = 150, z = -260, hw = 28, hd = 26 },
+		{ x = -280, z = -120, hw = 26, hd = 28 },
+		{ x = 280, z = -120, hw = 26, hd = 28 },
+	}
+
+	local function isPlayableCorridor(px: number, pz: number): boolean
+		for _, pad in clearPads do
+			if inRect(px, pz, pad.x, pad.z, pad.hw, pad.hd) then
+				return true
+			end
+		end
+		if nearPolyline(px, pz, midLane, laneHalf.primary) then
+			return true
+		end
+		if nearPolyline(px, pz, goodToA, laneHalf.approach) then
+			return true
+		end
+		if nearPolyline(px, pz, goodToB, laneHalf.approach) then
+			return true
+		end
+		if nearPolyline(px, pz, aToB, laneHalf.arterial) then
+			return true
+		end
+		if nearPolyline(px, pz, terrorToA, laneHalf.approach) then
+			return true
+		end
+		if nearPolyline(px, pz, terrorToB, laneHalf.approach) then
+			return true
+		end
+		if nearPolyline(px, pz, westBypass, laneHalf.alley) then
+			return true
+		end
+		if nearPolyline(px, pz, eastBypass, laneHalf.alley) then
+			return true
+		end
+		if nearPolyline(px, pz, earlyCrossover, laneHalf.crossover) then
+			return true
+		end
+		if nearPolyline(px, pz, lateCrossover, laneHalf.crossover) then
+			return true
+		end
+		if nearPolyline(px, pz, northLink, laneHalf.crossover) then
+			return true
+		end
+		return false
+	end
+
+	-- Stamp dense blocks across the footprint; only carved corridors stay open.
+	local pitch = 52
+	local blockSize = 40
+	local idx = 0
+	for x = -400, 400, pitch do
+		for z = -500, 160, pitch do
+			if not isPlayableCorridor(x, z) then
+				idx += 1
+				-- Pseudo-random height from position (stable across rebuilds)
+				local h = 16 + ((math.abs(x) + math.abs(z) * 3) % 5) * 4
+				local brickish = ((x + z) % (pitch * 2)) == 0
+				part(
+					blocksFolder,
+					"Block_" .. idx,
+					Vector3.new(blockSize, h, blockSize),
+					CFrame.new(x, floorY + h / 2, z),
+					if brickish then COLOR.brick else COLOR.concrete,
+					if brickish then Enum.Material.Brick else Enum.Material.Concrete
+				)
+				-- Corner interior / cover nook on street-facing edges (every other block)
+				if idx % 2 == 0 then
+					local nookX = x + (if x < 0 then blockSize / 2 + 4 else -(blockSize / 2 + 4))
+					local nookZ = z
+					if isPlayableCorridor(nookX, nookZ) then
+						part(
+							blocksFolder,
+							"CornerCover_" .. idx,
+							Vector3.new(8, 6, 8),
+							CFrame.new(nookX, floorY + 3, nookZ),
+							COLOR.cover
+						)
+					end
+				end
+			end
+		end
+	end
+
+	-- Mid hub side masses: pinch Market into a lane (leave center avenue open).
 	part(
-		massing,
-		"CentralPlaza",
-		Vector3.new(220, 28, 140),
-		CFrame.new(0, floorY + 14, -40),
-		COLOR.concrete
-	)
-	-- Northern market block (terror approaches go around)
-	part(
-		massing,
-		"NorthMarketBlock",
-		Vector3.new(160, 18, 80),
-		CFrame.new(0, floorY + 9, 140),
+		lanesFolder,
+		"MarketHubN",
+		Vector3.new(70, 22, 36),
+		CFrame.new(0, floorY + 11, 40),
 		COLOR.brick,
 		Enum.Material.Brick
 	)
-
-	-- Three macro routes from Motorcade with bypasses:
-	-- 1) Center avenue (through arcade) — choke at CanalBridge
-	-- 2) West lane — alley choke with east bypass
-	-- 3) East lane — plaza gate with west bypass
-
-	-- Center choke (≤30 studs wide) + bypass lanes ±40
 	part(
-		massing,
+		lanesFolder,
+		"MarketHubSW",
+		Vector3.new(36, 18, 40),
+		CFrame.new(-42, floorY + 9, -110),
+		COLOR.concrete
+	)
+	part(
+		lanesFolder,
+		"MarketHubSE",
+		Vector3.new(36, 18, 40),
+		CFrame.new(42, floorY + 9, -110),
+		COLOR.concrete
+	)
+
+	-- Center canal choke (~24 stud opening) on Motorcade→Market lane
+	part(
+		lanesFolder,
 		"CanalBridgeChokeL",
-		Vector3.new(40, 16, 28),
-		CFrame.new(-40, floorY + 8, -300),
+		Vector3.new(36, 16, 26),
+		CFrame.new(-30, floorY + 8, -300),
 		COLOR.choke
 	)
 	part(
-		massing,
+		lanesFolder,
 		"CanalBridgeChokeR",
-		Vector3.new(40, 16, 28),
-		CFrame.new(40, floorY + 8, -300),
+		Vector3.new(36, 16, 26),
+		CFrame.new(30, floorY + 8, -300),
 		COLOR.choke
 	)
-	-- Opening ~24 studs in the middle (smokeable choke)
 	part(
-		massing,
+		lanesFolder,
 		"CanalDeck",
-		Vector3.new(28, 1, 36),
+		Vector3.new(24, 1, 32),
 		CFrame.new(0, floorY + 0.5, -300),
 		COLOR.asphalt,
 		Enum.Material.Asphalt
 	)
 
-	-- West alley choke + longer bypass further west
+	-- West approach choke (~26 stud gap on Good→Consulate lane) + longer western alley bypass
 	part(
-		massing,
-		"WestAlleyChoke",
-		Vector3.new(24, 18, 50),
-		CFrame.new(-160, floorY + 9, -220),
+		lanesFolder,
+		"WestLaneChokeL",
+		Vector3.new(28, 18, 22),
+		CFrame.new(-212, floorY + 9, -265),
 		COLOR.choke
 	)
 	part(
-		massing,
+		lanesFolder,
+		"WestLaneChokeR",
+		Vector3.new(28, 18, 22),
+		CFrame.new(-158, floorY + 9, -265),
+		COLOR.choke
+	)
+	part(
+		lanesFolder,
 		"WestBypassGapMarker",
-		Vector3.new(18, 0.3, 60),
-		CFrame.new(-220, floorY + 0.2, -220),
+		Vector3.new(12, 0.3, 70),
+		CFrame.new(-220, floorY + 0.2, -265),
 		COLOR.path,
 		Enum.Material.Neon,
 		false
 	)
 
-	-- East plaza gate + bypass
+	-- East approach choke + costly eastern alley bypass
 	part(
-		massing,
-		"EastPlazaGateL",
-		Vector3.new(30, 16, 20),
-		CFrame.new(130, floorY + 8, -200),
+		lanesFolder,
+		"EastLaneChokeL",
+		Vector3.new(28, 18, 22),
+		CFrame.new(158, floorY + 9, -265),
 		COLOR.choke
 	)
 	part(
-		massing,
-		"EastPlazaGateR",
-		Vector3.new(30, 16, 20),
-		CFrame.new(190, floorY + 8, -200),
+		lanesFolder,
+		"EastLaneChokeR",
+		Vector3.new(28, 18, 22),
+		CFrame.new(212, floorY + 9, -265),
 		COLOR.choke
 	)
 	part(
-		massing,
+		lanesFolder,
 		"EastBypassGapMarker",
-		Vector3.new(18, 0.3, 60),
-		CFrame.new(240, floorY + 0.2, -200),
+		Vector3.new(12, 0.3, 70),
+		CFrame.new(220, floorY + 0.2, -265),
 		COLOR.path,
 		Enum.Material.Neon,
 		false
 	)
 
-	-- Crossover connectors (~40% and ~70% of escort)
+	-- Southern arterial pinch points on Consulate↔Precinct boulevard (away from canal mid)
 	part(
-		massing,
-		"CrossoverEarly",
-		Vector3.new(120, 1, 16),
-		CFrame.new(0, floorY + 0.5, -380),
-		COLOR.asphalt,
-		Enum.Material.Asphalt
+		lanesFolder,
+		"SouthBlvdChokeW",
+		Vector3.new(36, 14, 24),
+		CFrame.new(-200, floorY + 7, -250),
+		COLOR.choke
 	)
 	part(
-		massing,
-		"CrossoverLate",
-		Vector3.new(160, 1, 16),
-		CFrame.new(0, floorY + 0.5, -160),
-		COLOR.asphalt,
-		Enum.Material.Asphalt
+		lanesFolder,
+		"SouthBlvdChokeE",
+		Vector3.new(36, 14, 24),
+		CFrame.new(200, floorY + 7, -250),
+		COLOR.choke
 	)
 
-	-- Overhead covered stretch (arcade) on primary center route
-	for i = -4, 4 do
+	-- Decision wedges (~200–250 from each house): commit past these costs a long rotate
+	part(
+		lanesFolder,
+		"DecisionA",
+		Vector3.new(32, 14, 32),
+		CFrame.new(-210, floorY + 7, -50),
+		COLOR.wood,
+		Enum.Material.Wood
+	)
+	part(
+		lanesFolder,
+		"DecisionB",
+		Vector3.new(32, 14, 32),
+		CFrame.new(210, floorY + 7, -50),
+		COLOR.wood,
+		Enum.Material.Wood
+	)
+
+	-- Overhead arcade on primary center route (required §7.5 cover from above)
+	for i = -3, 3 do
 		part(
-			massing,
+			lanesFolder,
 			"ArcadePillar" .. i,
 			Vector3.new(3, 14, 3),
-			CFrame.new(i * 16, floorY + 7, -340),
+			CFrame.new(i * 14, floorY + 7, -340),
 			COLOR.concrete
 		)
 	end
 	part(
-		massing,
+		lanesFolder,
 		"ArcadeRoof",
-		Vector3.new(140, 2, 28),
+		Vector3.new(100, 2, 26),
 		CFrame.new(0, floorY + 15, -340),
 		COLOR.metal,
 		Enum.Material.Metal
 	)
 
-	-- Decision-point wedges near each house (~200–250 out)
-	part(
-		massing,
-		"DecisionA",
-		Vector3.new(36, 12, 36),
-		CFrame.new(-200, floorY + 6, -40),
-		COLOR.wood,
-		Enum.Material.Wood
-	)
-	part(
-		massing,
-		"DecisionB",
-		Vector3.new(36, 12, 36),
-		CFrame.new(200, floorY + 6, -40),
-		COLOR.wood,
-		Enum.Material.Wood
-	)
-
-	-- Route cover cadence (≤60 stud open gaps)
-	for i = 1, 7 do
-		local z = -500 + i * 55
-		streetCover(massing, -36, z, "RouteCoverL" .. i)
-		streetCover(massing, 36, z, "RouteCoverR" .. i)
+	-- Street cover cadence along the three macro routes (≤60 stud open gaps)
+	for i = 1, 8 do
+		local z = -480 + i * 50
+		streetCover(lanesFolder, -18, z, "MidCoverL" .. i)
+		streetCover(lanesFolder, 18, z, "MidCoverR" .. i)
+	end
+	for i = 1, 5 do
+		local t = i / 6
+		local ax = goodToA[1].X + (goodToA[#goodToA].X - goodToA[1].X) * t
+		local az = goodToA[1].Z + (goodToA[#goodToA].Z - goodToA[1].Z) * t
+		local bx = goodToB[1].X + (goodToB[#goodToB].X - goodToB[1].X) * t
+		local bz = goodToB[1].Z + (goodToB[#goodToB].Z - goodToB[1].Z) * t
+		streetCover(lanesFolder, ax + 14, az, "WestLaneCover" .. i, 0.4)
+		streetCover(lanesFolder, bx - 14, bz, "EastLaneCover" .. i, -0.4)
 	end
 end
 
